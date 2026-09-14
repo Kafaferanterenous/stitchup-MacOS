@@ -1,0 +1,122 @@
+STITCHUP — WINDOWS BUILD HANDOFF
+================================
+Created: 2026-09-10  Australia/Adelaide
+For: the AI that builds and verifies the Stitchup desktop app on WINDOWS.
+
+YOU ARE NOT STARTING A NEW PROJECT. You are joining an ongoing multi-AI project.
+Read everything below IN ORDER before writing any code.
+
+READ FIRST (in this order)
+1. dev_notes.txt                       (live journal, latest checkpoint last)
+2. spec/pdf_editor_ai_handoff_prompt.txt (project rules, stages, LEGAL bounds)
+3. docs/STAGE0_DEPENDENCY_LEDGER.md      (approved deps ONLY — see ledger §3)
+4. docs/STAGE0_DOCUMENT_MODEL.md         (model you must implement)
+5. docs/STAGE0_ENGINE_INTERFACES.md      (interfaces you must implement)
+6. docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md (the contract you must pass)
+7. README.md                             (map of the repo)
+
+REPO STATUS AT HANDOFF (2026-09-10, written on macOS)
+- Stage 0 docs complete. Rust core crate in source/core is DONE and verified:
+  `cargo test` passes, `scripts/generate_fixtures.sh` + `scripts/verify_fixtures.sh`
+  succeed (13 fixtures, F-09 deferred). Run these from the repo ROOT.
+- The desktop host source/app exists as a FULL SCAFFOLD: React/TS frontend
+  (store + adapters + features + three themes) AND src-tauri (Tauri 2) with the
+  Stage-1 commands open_document / page_op / cmd_set_metadata / commit_export /
+  source_hash implemented over stitchup-core and compiling (`cargo check`).
+- The frontend has NOT been npm-installed or built anywhere yet (no Node.js on
+  the authoring machine). YOUR FIRST ACTIONS: install frontend deps per
+  source/app/package.json (record every npm dep + checksum in ledger §4b),
+  `npm ci`, then `npm run tauri dev` / `npm run tauri build`.
+- src-tauri/capabilities/default.json currently grants dialog:default + fs:default
+  (scaffold-broad). Tighten to the Stage-1 minimum as part of your build.
+- Icons: src-tauri/icons/icon.png is a 32x32 placeholder. Generate a real
+  original icon with `cargo tauri icon <source.png>` (clean-room artwork!) and
+  reference it in tauri.conf.json before final packaging.
+
+MISSION
+Build the Stage 1 Stitchup desktop application for Windows, run it against the
+acceptance contract, and produce the portable artifacts. The core codebase is
+cross-platform (Tauri 2 + React/TypeScript + the D-0x component set); your job
+is to make that core build, run, and pass the contract on Windows and package it
+in the Windows formats. Do NOT fork the core or invent a Windows-only engine.
+
+SHARED CORE RULES (non-negotiable)
+- Implement the interfaces in docs/STAGE0_ENGINE_INTERFACES.md faithfully:
+  OpenDocumentAdapter, RendererAdapter, PageTreeAdapter, MetadataAdapter,
+  CommitAdapter (atomic temp + fsync + rename), ProviderRegistry, CommandBus.
+- Never write to the Opens path. "Save" is always export-to-new-target. Refuse
+  target == source path (permission_denied). Visible warning on overwrite.
+- Deps: ONLY from ledger §3 (D-01..D-09). Anything else (incl. QPDF, PDFium,
+  pyHanko, tesseract.js, @signpdf) is GATED from this build. Theming: build the
+  three themes (XP-inspired default, Dark, Blue) with readable button/menu
+  contrast — WCAG spot-check the palette. Independently styled; do not copy
+  Microsoft XP or any retro-theme project artwork.
+- Do NOT copy code from PDF Gear, Nitro/Jumbl, Adobe, or any other editor.
+  Behavior study only. No AGPL/GPL components (MuPDF, Ghostscript) — beware
+  transitive deps; run a license check on the final lockfile.
+
+WINDOWS-SPECIFIC BUILD
+Prerequisites (document exact versions you used in dev_notes.txt):
+- Windows 10/11 x64 (and, if possible, a Windows-on-ARM box for aarch64)
+- Rust stable via rustup; ensure MSVC target present
+- Microsoft C++ Build Tools / Visual Studio C++ workload (MSVC link.exe etc.)
+- Node.js LTS + npm
+- Tauri 2 CLI (@tauri-apps/cli) matching your Tauri crate version
+
+Targets and artifacts (produce at least):
+1. Portable single-folder build (no installer) — main deliverable. Must run
+   from one folder without an install step. If a WebView2 bootstrap is required
+   on an evergreen-WebView2-less Windows, add a tiny bootstrap step with a
+   clear message, and RECORD that dependency in dev_notes.txt + ledger.
+2. NSIS installer (.exe) and MSI (WiX) if your toolchain is available —
+   optional but preferred. Both must preserve the same behavior.
+3. icon/app metadata: .ico + proper app name/version identity.
+
+Capabilities file (src-tauri/capabilities/*.json): grant ONLY what Stage 1
+needs (dialog: open/save, fs in a scoped dir for export temp, window ops).
+Do not request blanket fs permissions; keep the temp-write + atomic-rename in a
+Rust command so the frontend never touches arbitrary paths.
+
+Build commands to use (adapt versions, then record them):
+  npm ci && npm run tauri build -- --bundles nsis,msi,wix  (or the target list
+  your Tauri 2 version supports)
+Also produce an unsigned portable ZIP (unzip -l must list no node_modules).
+
+VERIFICATION (this is what makes your deliverable count)
+1. Run the full Stage 1 contract: fixtures F-01..F-14 via scripts/generate_fixtures,
+   then A-c1..A-c15 from docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md. Fill the
+   WINDOWS column of the parity sheet.
+2. Confirm atomic save + overwrite refusal + malformed-file resilience
+   (A-c2,3,4,5,7,8) manually with file-byte checks if automation is limited.
+3. Measure + record: cold start to first painted page, idle memory, F-11 (1000
+   pages) open time and scrolling, save-as time, packaged size (per artifact).
+4. Run a license scan of the final dependency lockfile (cargo tree --license /
+   npm licenses list or an equivalent) and confirm only approved D-0x licenses
+   appear; put result + any NOTICE files in NOTICES/.
+5. GUI visual sign-off: render F-02 at zoom 1.0 and 3.0; confirm no blank/tear.
+   Do NOT ship test screenshots containing any real document content.
+
+DO NOT
+- Run GUI visual comparisons or live external integrations without explicit
+  authorization. Static/structured checks are not live acceptance.
+- Download or bundle anything not on the approved ledger. Record downloads
+  (source, size, sha256, license, scope) in dev_notes.txt.
+- Overwrite or ignore earlier journal entries or other platforms' handoffs.
+- Sign installers without explicit instruction (unsigned is fine for now).
+
+BEFORE STOPPING (mandatory)
+1. Append to dev_notes.txt: date/time, machine + toolchain versions, files
+   created/changed, commands run + results, tests run/not run, license-check
+   result, all downloads with hashes, risks, deviations, next unfinished item.
+2. Append `RESUME NEXT SESSION` naming the first files/commands to re-inspect.
+3. Record any component pinned outside ledger ranges in the ledger §4 block.
+
+HAND BACK (your final message must contain)
+- What artifacts were produced and where.
+- The Windows column of the parity sheet (A-c1..A-c15) + non-functional numbers.
+- Exact dep versions + sha256s added to ledger/dev_notes.
+- Anything out of budget or a platform parity gap vs Linux/macOS notes.
+- The RESUME NEXT SESSION pointer.
+
+Do not claim the build is "portable" if it requires a WebView2 install on the
+target; state the requirement honestly instead.

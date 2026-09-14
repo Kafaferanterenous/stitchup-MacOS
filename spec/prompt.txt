@@ -1,0 +1,38 @@
+You are an expert full-stack systems engineer and architect. Your task is to design and build **Stitchup**, a fully featured, portable, offline-first desktop/web-based PDF editor. 
+
+Stitchup must rival commercial software like Adobe Acrobat while remaining strictly open-source, lightweight, highly portable, and legally compliant (respecting all open-source licenses such as AGPL/MIT/Apache-2.0 and including proper third-party acknowledgments in an "About" section). 
+
+To achieve a "least amount of dependencies" footprint without sacrificing capability, prioritize writing native, pure-language implementations or leveraging lightweight, self-contained libraries over bloated, multi-service architectures.
+
+---
+
+### Core Technical Requirements & Architecture
+
+1. **Architecture & Portability:**
+   * **Framework:** Build using **Tauri** (Rust backend + Web frontend) or **Electron**, packaged as a single standalone, portable executable (no installer required, runs locally out of a single folder).
+   * **Core Engine:** Use **PDF.js** (Mozilla) for rendering and canvas interaction on the frontend, and a tightly bound systems language engine (Rust via crates like `lopdf` / `pdfium-render` or a compact Python/Node binary backend) for heavy manipulation. Minimize external npm/cargo dependencies by writing custom lightweight wrappers where feasible.
+
+2. **Feature Set Implementation Guide:**
+   * **Text Manipulation & Editing:** Implement a smart text-block overlay system. Click-to-edit maps pixel coordinates and font metrics from the PDF stream to an HTML content-editable layer, allowing full text reflow, font family/size substitution, and character manipulation.
+   * **Page, Graphics & Vector Operations:** Implement full drag-and-drop page reordering, splitting, merging, rotation, and cropping. Use an embedded vector canvas layer (e.g., Fabric.js or a lightweight native SVG renderer) for drawing shapes, freehand annotations, and inserting graphics.
+   * **Signatures & Cryptographic Security:** 
+     * Implement a cryptographic signing module (using libraries like WebCrypto API or Rust crypto primitives) to apply verifiable digital signatures and visual signature blocks (including image/pad stamps).
+     * Implement **Security Management**: Full AES encryption/decryption, password protection (owner/user passwords), and permission flag enforcement (blocking/allowing printing, copying, editing). Include a fast "Remove Security" tool using decrypted stream reconstruction.
+   * **Forms & Flattening:**
+     * **Form Builder:** Allow users to drag-and-drop interactive form fields (AcroForms: text fields, checkboxes, radio buttons, dropdowns) with custom properties.
+     * **Flattening Engine:** Write a dedicated rasterization/flattening routine that merges all interactive annotations, form fields, and vector layers into a static, immutable background layer so they can no longer be edited or extracted.
+   * **Export & Advanced Compression:**
+     * Implement a custom stream optimization and image downsampling algorithm to compress PDF file sizes significantly without losing visual fidelity.
+     * Export options: Standard PDF, PDF/A compliance check, images (PNG/JPEG extraction per page), and searchable text (OCR integration fallback using lightweight local models if possible).
+
+3. **Additional "Stitchup-Exclusive" Pro Features to Include:**
+   * **Redaction Tool:** Permanent text and image black-out/scrubbing that strips metadata and underlying text strings entirely from the file stream (preventing hidden data leaks).
+   * **Bates Numbering:** Automated sequential legal stamping across batch multi-page documents.
+   * **Local AI Assistant Hook (Optional/Modular):** A clean interface hook allowing users to plug in a local LLM (like Ollama running Llama 3) to summarize selected PDF text or auto-fill forms.
+
+4. **Legal & Licensing Compliance:**
+   * Automatically generate an `ACKNOWLEDGEMENTS.md` or an in-app "Licenses" modal dynamically parsing the licenses of all bundled open-source dependencies (e.g., MIT, Apache 2.0, BSD) to ensure 100% legal compliance.
+
+Please generate the foundational project structure, core configuration files, and the primary backend/frontend integration scripts required to spin up Stitchup.
+
+Make it have windows XP theme and dark mode and blue mode. Note that it should have enough contrast for user to be able to read whats on the buttons or in the menu.

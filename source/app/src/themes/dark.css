@@ -1,0 +1,35 @@
+/* Stitchup dark theme. Tokens override the default (load after xp.css). */
+
+:root {
+  --bg: #1e1f22;
+  --bg-toolbar: #26282c;
+  --bg-viewer: #17181b;
+  --bg-pages: #232529;
+  --bg-page: #ffffff;
+  --bg-thumb: #2b2d31;
+  --bg-thumb-selected: #1f3550;
+  --bg-input: #1a1b1e;
+  --bg-button: #31343a;
+  --bg-modal: #26282c;
+  --bg-commit: #202225;
+  --bg-error: #3a2323;
+
+  --fg: #e6e7e9;
+  --fg-muted: #a2a6ad;
+  --fg-on-error: #ffcfcf;
+
+  --border: #4b4f56;
+  --border-button: #565b63;
+  --border-input: #4b4f56;
+  --border-thumb: #3a3e44;
+  --border-error: #8a4a4a;
+
+  --accent: #5aa0ff;
+  --focus: #5aa0ff;
+  --ok: #6fce8f;
+  --err: #ff8a85;
+  --warn: #ffbf6b;
+
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --shadow: rgba(0, 0, 0, 0.55);
+}

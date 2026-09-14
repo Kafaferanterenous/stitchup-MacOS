@@ -1,0 +1,361 @@
+2026-08-20  Australia/Adelaide
+
+Project 021 PDF editor investigation started in
+`E:\scripts\021_2026_08_18_Stichup_PDF_Editor`.
+
+Read the existing `prompt.txt`. The project is specification-only; there is no
+source tree, dependency lockfile, build, renderer, sample set, or test suite.
+
+Research recorded in `RESEARCH_2026_08_20_PDF_EDITOR_ECOSYSTEM.md`. PDF.js
+(Apache-2.0) is a strong rendering/UI reference, pdf-lib (MIT) is useful for
+page operations/forms/overlays, and QPDF (Apache-2.0) is useful for structural
+PDF transformations. MuPDF is technically excellent but AGPL/commercial, and
+PDFium is powerful but large and complex. No source, package, font, OCR model,
+or binary was downloaded, installed, built, or executed.
+
+Legal boundary: do not copy PDF Gear, Nitro Pro, PDF.js viewer assets, or any
+other project source or distinctive UI. Record exact version, hash, license,
+notices, and linking obligations before adding dependencies. Keep redaction,
+signatures, encryption, OCR, and PDF/A behind separate verified feature gates.
+
+Recommended next priority: create a clean-room document model and Stage 1
+viewer/page-workspace acceptance contract before choosing Tauri/PDF.js versus a
+native renderer.
+
+2026-08-20 — Created `pdf_editor_ai_handoff_prompt.txt` for another AI. It
+contains the staged build plan, PDF engine choices, clean-room legal rules,
+redaction/signature safety requirements, portability tracks, dependency ledger,
+tests, and mandatory multi-AI progress/handover procedure. No implementation,
+download, build, or external integration was started.
+
+RESUME NEXT SESSION
+
+Read `pdf_editor_ai_handoff_prompt.txt`, then create the clean-room document
+model, engine interfaces, sanitized fixture set, and Stage 1 acceptance contract.
+
+2026-09-10  Australia/Adelaide  Working dir: /Users/groot/opencode_mac/007_2026_09_10_Stitchup
+
+Project 021 was adopted as this workspace's Project 007 ("Stitchup"). Spec files
+copied from `other/021_2026_08_18_Stichup_PDF_Editor` into `spec/` (unchanged:
+prompt.txt, pdf_editor_ai_handoff_prompt.txt, dev_notes.txt,
+RESEARCH_2026_08_20_PDF_EDITOR_ECOSYSTEM.md). A copy of spec/dev_notes.txt is
+kept at repo root as `dev_notes.txt`; this root copy is the live journal.
+
+Stage 0 created (design-only, nothing downloaded/built/run):
+- docs/STAGE0_DOCUMENT_MODEL.md — model: Document/Page/Metadata/Permissions/
+  AcroForm, Operation history (undo/redo), source hash invariant, overlay vs
+  native annotation split, engine tags.
+- docs/STAGE0_ENGINE_INTERFACES.md — OpenDocumentAdapter, RendererAdapter,
+  PageTreeAdapter, MetadataAdapter, CommitAdapter (atomic temp+fsync+rename,
+  never-mutate-source), ProviderRegistry, CommandBus; EngineError codes.
+- docs/RESEARCH_2026_09_10_GITHUB_ECOSYSTEM.md — surveyed editors + GitHub
+  projects + permissive building blocks (this supersedes the 08-20 ecosystem
+  notes for component selection).
+
+Research highlights (verify hashes at download time):
+- Best FOSS editors are split-purpose; Stirling-PDF (open-core now), PDFsam
+  (AGPL), PDF Arranger (GPL), Xournal++/Okular (GPL), ONLYOFFICE (AGPL). Study
+  only, do not copy.
+- Closest-architecture references: OpenAEC open-pdf-studio (Tauri2+PDFium
+  worker pool, LGPL), jasonulbright/Open-PDF-Studio (MIT; pdf.js+pdf-lib+
+  pikepdf+pdfminer.six+pyHanko; avoids its AGPL Ghostscript), wbp318/HermosaPDF
+  (Tauri2+lopdf+pdfjs+pdf-lib+Konva, retro skin), CasualOffice/pdf (PDFium
+  everywhere, docs only).
+- Permissive candidates chosen for Stage 1 baseline: Tauri 2 + React/TS + Vite,
+  PDF.js renderer, pdf-lib page ops/forms/overlay compile, lopdf (MIT, Rust,
+  pin >=0.42.0 — RUSTSEC-2026-0187 fixed in 0.42.0) for decryption/structural
+  normalization, Konva overlay, perfect-freehand ink, dnd-kit reorder.
+- Gated later: @signpdf+node-forge (signing), tesseract.js (OCR, language data
+  recorded separately), pikepdf/QPDF (redaction/structural; MPL-2.0),
+  pikepdf-style redaction, PDFium + @embedpdf/pdfium (needs dedicated review),
+  AI = local provider only. Excluded: MuPDF, Ghostscript, Stirling proprietary/,
+  EmbedPDF cloudpdf/server.
+
+Decisions recorded:
+- Do not choose renderer/framework by popularity; run the size/startup/fidelity
+  experiment per handoff before finalizing Track A vs B.
+- Nothing may be downloaded until the dependency/provenance ledger is written
+  and approved. That ledger is the next deliverable.
+
+NOT YET DONE (next priorities, in order):
+1. docs/STAGE0_DEPENDENCY_LEDGER.md — per-component records (source, version,
+   SHA-256 to be filled at download, license, NOTICE/linkage, modification
+   scope) plus source-preservation + atomic-save rules.
+2. docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md — sanitized fixture PDF set and the
+   Stage 1 viewer/page-workspace acceptance contract (open/save-as, thumbnails,
+   zoom/fit/search/selection, reorder/rotate/delete/insert, metadata, undo,
+   atomicity, themes incl. XP/dark/blue with readable contrast).
+3. Project README.md tying spec + Stage 0 together.
+
+No tests were run (nothing implemented). No dependencies were added.
+
+RESUME NEXT SESSION
+
+Read `dev_notes.txt`, then write `docs/STAGE0_DEPENDENCY_LEDGER.md` and
+`docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md`, then the top-level README. Do not
+download/build any dependency until the ledger exists and is approved.
+
+2026-09-10  (second session)  Australia/Adelaide  wd: /Users/groot/opencode_mac/007_2026_09_10_Stitchup
+
+Stage 0 completed. Files created this session:
+- docs/STAGE0_DEPENDENCY_LEDGER.md — rules, data-safety rules, ledger v1.
+  APPROVED Stage 1 baseline: D-01 Tauri 2, D-02 React19/TS/Vite, D-03
+  pdfjs-dist (Apache-2.0), D-04 pdf-lib 1.4.0 (MIT), D-05 lopdf 0.44.0 MIT pin
+  >=0.42.0 (RUSTSEC-2026-0187), D-06 Konva, D-07 perfect-freehand, D-08 dnd-kit,
+  D-09 Tauri plugins. PENDING: D-10 @embedpdf/pdfium, D-11 pdfium-render, D-12
+  QPDF/qpdf-wasm, D-13 pikepdf (MPL-2.0 redaction gate), D-14 pdfminer.six,
+  D-15 @signpdf/node-forge, D-16 pyHanko, D-17 tesseract.js, D-18 fabric.js.
+  SHA-256/size blanks to be filled at download time by the building AI.
+- docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md — fixture catalog F-01..F-14
+  (generated, deterministic, sanitized), Stage 1 acceptance tests A-c1..A-c15,
+  non-functional budgets, platform parity sheets (per-OS columns).
+- README.md — repo map + rules.
+- AI_HANDOFF_WINDOWS.txt and AI_HANDOFF_LINUX.txt — self-contained briefs for
+  the AIs that will build/package/verify the Windows and Linux desktop builds,
+  including their Reading list, platform targets, packaging, license scans,
+  parity sheet duties, journaling, and hand-back format.
+
+Decisions: no downloads happened this session; nothing built; no tests run.
+The building AIs are instructed to pin exact versions + record sha256 in the
+ledger before first cargo/npm install, and to append journal entries.
+
+RESUME NEXT SESSION
+
+The project is ready for the build phase. Next AI: read AI_HANDOFF_WINDOWS.txt
+or AI_HANDOFF_LINUX.txt (or scaffold the shared Stage 1 core in `source/`
+following docs/STAGE0_ENGINE_INTERFACES.md), generate fixtures via
+`scripts/generate_fixtures`, implement the approved D-01..D-09 stack, then run
+the A-c1..A-c15 contract and fill the parity sheet before packaging for the
+first target platform.
+
+2026-09-10  (build session)  Australia/Adelaide  wd: /Users/groot/opencode_mac/007_2026_09_10_Stitchup
+
+Rust structural core (D-05 lopdf) is implemented, compiled, and verified on macOS.
+
+Environment facts: no node/npm on this machine (frontend cannot build here);
+rustc/cargo 1.98.0, python3 3.9.6, brew+git present. No qpdf/gs/pdftk. So the
+locally-testable path is the Rust core + fixture generator + verify harness; the
+Tauri/React frontend is committed as code for the Windows/Linux build AIs.
+
+Created in source/core:
+- Cargo.toml — crate name stitchup-core, edition 2021, deps lopdf 0.44, sha2
+  0.10, flate2 1; two bins: generate_fixtures, verify_fixtures.
+- src/error.rs — EngineError + ErrorCode (OpenFailed..ValidationFailed),
+  From<std::io::Error>, From<lopdf::Error>.
+- src/hash.rs — sha256_hex + unit tests (2 passing).
+- src/model.rs — PageMeta/Metadata/OpenInfo, page_box/page_rotation/
+  page_has_annotations, read_metadata, collect_pages, build_open_info.
+- src/ops.rs — open_bytes/open_path, reorder, rotate_pages, delete_pages,
+  insert_blank, extract, set_metadata, commit_export (atomic temp+fsync+
+  rename+dir fsync), tmp_path_for, assert_source_unmodified.
+- src/bin/generate_fixtures.rs — emits F-01..F-14 (minus deferred F-09) into
+  fixtures/generated/. F-04 is genuinely RC4-encrypted (V1, user pw
+  "stitchup-user", owner pw "stitchup-owner"). F-08 corrupts the tail of a
+  valid doc. F-10 embeds a file. F-14 carries Info + XMP metadata.
+- src/bin/verify_fixtures.rs — reloads every fixture and asserts the acceptance
+  subset: page counts, letter size (F-01), rotations 0/90/180/270 (F-03), F-04
+  isEmptyEncrypted/wasEncrypted + opens with user password, F-05/F-06 Annots,
+  F-08 no-panic (lenient-recover OK), F-11==200 pages, F-12 blank 1p, F-13 XFA,
+  F-14 metadata+pages.
+
+lopdf 0.44 API notes (differ from 0.39 examples):
+- Object::as_dict/as_dict_mut/as_array/as_reference all return Result.
+- Dictionary::get(key) returns Result<&Object, Error>; .set(key,&Into<Vec<u8>/*str ok*/, Into<Object>).
+- Document::get_pages() -> BTreeMap<u32, ObjectId> (NOT Result); no
+  save_to_bytes() — use save_to(&mut Vec); trailer is a Dictionary; encrypted
+  loads are LAZY (plain load keeps is_encrypted() true; password load strips
+  /Encrypt and sets was_encrypted()); load_mem_with_password is deprecated in
+  favor of load_mem_with_options(LoadOptions{password}).
+
+Verification: `cargo test` 2/2 pass; `cargo run --bin generate_fixtures` writes
+13 fixture files; `cargo run --bin verify_fixtures` => 0 failures. Commands run
+from the project root (fixtures path is relative to CWD).
+
+Fixtures written (fixtures/generated/): F-01_text.pdf (1145B), F-02_mixed (853B),
+F-03_rotated (1412B), F-04_encrypted (808B), F-05_acroform (792B),
+F-06_annotations (661B), F-07_unicode_latin1 (580B), F-08_malformed (552B),
+F-10_attachments (845B), F-11_large_200p (61765B), F-12_blank (481B),
+F-13_xfa (669B), F-14_pdfa_lite (1122B).
+F-09_incremental.pdf deferred (needs a raw-append helper; lopdf save() always
+emits a single clean revision).
+
+Dependencies downloaded (first cargo build): recorded in ledger §4b with
+Cargo.lock checksums: lopdf 0.44.0, sha2 0.10.9 (0.11.0 transitive), flate2
+1.1.10, + transitive crc32fast 1.5.1 / miniz_oxide 0.9.1 / adler2 2.0.1 etc.
+No source files modified. lopdf's bundled Montserrat font must NOT be shipped.
+
+Open follow-ups (unchanged for the build AIs):
+1. Write the Tauri+React app shell under source/app (committed code; the
+   packaging AIs run npm on their machines). Structure already scaffolded:
+   source/app/frontend/src/{adapters,features,themes}, source/app/src-tauri/src.
+2. Implement the renderer (pdf.js) + Konva overlay + three themes per
+   STAGE0_FIXTURES_AND_ACCEPTANCE, then run A-c1..A-c15 and parity sheets.
+3. Fill ledger §4b entries (same block shape) for every npm dependency at first
+   install: D-01..D-03, D-06..D-09.
+4. Future stage gates (per handoff) before D-10..D-18 + redaction/sign/OCR/PDF-A.
+
+RESUME NEXT SESSION
+
+Continue from this checkpoint. The Rust core compiles clean and the fixture
+acceptance harness is green (0 failures). Next: scaffold source/app
+(Tauri 2 + React/TS/Vite + pdf.js + Konva + dnd-kit, 3 themes) as committed
+code for the Windows/Linux AIs, keeping adapter code behind the STAGE0 engine
+interfaces. Run: (fixtures) cargo run --bin generate_fixtures ;
+cargo run --bin verify_fixtures from repo root.
+
+=== 2026-09-10 session: app scaffold completed (Tauri 2 host + React frontend) ===
+
+Work done
+- Completed source/app frontend scaffold (commit-ready, unbuilt by design):
+  src/main.tsx, src/App.tsx (keymap: meta+o/z/shift+z/=/+/-/0/1/2/g),
+  features/toolbar/Toolbar.tsx (dialog open, zoom, view, theme select),
+  features/viewer/Viewer.tsx (pdf.js single+continuous via renderAdapter),
+  features/pageops/PageTree.tsx (dnd-kit sortable thumbs, rotate/delete/insert,
+  right-click multi-select), features/search/SearchBar.tsx,
+  features/metadata/MetadataModal.tsx, features/commit/CommitPanel.tsx
+  (dialog save-as + overwrite checkbox), features/common/MessageBox.tsx
+  (store.clearError added). Shared layout in src/styles/global.css; three
+  independent themes in src/themes/xp.css / dark.css / blue.css with a
+  dynamic loader in src/themes/theme.ts (default xp statically imported).
+  Operation type extended with optional beforeMeta for exact metadata undo.
+- Wrote the Tauri 2 host: source/app/src-tauri/{Cargo.toml,build.rs,
+  tauri.conf.json (v2, devUrl 1420, bundle.active=false),
+  capabilities/default.json, src/main.rs, src/lib.rs, src/commands.rs}.
+  Commands implement the Stage-1 adapter surface over stitchup-core:
+  open_document (cached session => refreshPages sees in-memory mutations,
+  never re-reads disk for an open path), page_op (reorder/rotate/delete/
+  insert_blank/extract), cmd_set_metadata, commit_export (refuses target==
+  source, blocks existing target without overwrite, assert_source_unmodified),
+  source_hash. Session = Mutex<SessionState> holding the in-memory PdfDoc +
+  original bytes. cargo check passes.
+- icons/icon.png = 32x32 RGBA placeholder (original); icons/README.md tells the
+  build AIs to run `cargo tauri icon` and flip bundle.active. tauri.conf.json
+  bundle.icon stays [] until real icons exist.
+- scripts/generate_fixtures.sh + scripts/verify_fixtures.sh (run from repo
+  root). Re-verified: verify_fixtures => 0 failures.
+- Updated README (status + layout) and both AI_HANDOFF files with a
+  REPO STATUS AT HANDOFF block + first-actions (npm install/record §4b, tauri
+  build, tighten capabilities, real icon).
+
+Environment/api notes
+- tauri-plugin-path does NOT exist on crates.io in Tauri 2; path permissions
+  are core:path:default (built into the tauri crate). Dropped the plugin.
+- tauri-build's generate_context! embeds a window icon and hard-fails when
+  missing AND when not RGBA -> generated the placeholder; keep it until the
+  AIs ship real art.
+- Tauri command error type must impl Serialize + Send: EngineError qualifies.
+- MutexGuard cannot be returned from a helper with borrows outliving it;
+  commands now clone owned fields (hash/count) and scope borrows per op.
+
+Ledger
+- New Rust deps for the host recorded here (fill §4b block at first Windows/
+  Linux check as instructed): tauri 2, tauri-build 2, tauri-plugin-dialog 2.7.3
+  (resolved), tauri-plugin-fs 2, base64 0.22, lopdf 0.44 (direct, transitively
+  pinned = already in lockfile). npm dependency records still owed by the AIs.
+
+Follow-ups (build AIs)
+1. npm install/ci in source/app per package.json; record every dep (name,
+   version, license, shasum) in ledger §4b using the DEPENDENCY_ADDED shape.
+2. npm run tauri dev + build on Windows/Linux; tighten capabilities/default;
+   ship a real original icon via `cargo tauri icon`.
+3. Run A-c1..A-c15 + parity sheets; F-09 incremental fixture still deferred.
+4. Stage gates (redaction/sign/encryption/OCR/PDF-A) remain closed.
+
+RESUME NEXT SESSION
+- Rust core + fixtures + Tauri host = green. Frontend must be built on the
+  Windows/Linux AIs (npm); nothing else is required on this machine.
+  Re-check first: source/app/src-tauri/src/commands.rs (session semantics),
+  source/app/src/adapters/structuralAdapter.ts, docs/STAGE0_ENGINE_INTERFACES.md.
+  To rebuild host: cargo check --manifest-path source/app/src-tauri/Cargo.toml
+
+=== 2026-09-10 END-OF-DAY checkpoint (stop today; resume MONDAY 14 Sep) ===
+
+Goal this session: install Node/npm + GitHub CLI so the frontend can be built
+locally and the project pushed to GitHub. Status locked in below.
+
+DONE
+- GitHub CLI installed: `gh version 2.100.0` (/usr/local/opt/gh). NOT yet
+  authenticated — pending user step `gh auth login` (interactive device/browser
+  flow) on resumption.
+- Kenine: no app/Stitchup source changes this session beyond the scaffold
+  previously committed. Core + fixtures + Tauri host all green as recorded.
+
+IN FLIGHT (survives logout — nohup'd, do NOT restart blindly)
+- `brew install node`: STILL COMPILING Node v26.8.2 from source (no bottle for
+  this macOS; ~661/2000 V8 objects as of 15:50, 2 clang workers, ETA ~3-4h more).
+    - caller pid: 51762  (brew.rb install node)
+    - node build subprocess: build.rb 88661
+    - log:  /tmp/brew-node.log
+    - source+build tree: /private/tmp/node-20260910-88661-lqw1ao/node-v26.8.2
+    - if it finishes over the break: `node --version` / `npm --version` work Monday.
+    - if interrupted/rebooted: rerun `brew install node` (cache's node-v26.8.2
+      tarball is already downloaded; the partial build dir will be discarded).
+
+NEXT STEPS (Monday 14 Sep)
+1. Confirm the detached build: `tail /tmp/brew-node.log` then `node --version`
+   && `npm --version`. If the process died, `brew install node` again.
+2. User: `gh auth login` (interactive). Then I can:
+     - record npm deps in ledger §4b, then `npm ci` + `npm run tauri dev` to
+       finally SEE the app on this machine.
+3. GitHub upload (user's choice of repo name/visibility): git init in repo
+   root, .gitignore build artifacts, commit, `gh repo create ... --push`.
+4. Append new dev_notes checkpoint once app is visibly running.
+
+RESUME NEXT SESSION
+- Read: this checkpoint; then run `tail -5 /tmp/brew-node.log`.
+- First commands: node --version; npm --version; gh auth status.
+- Do NOT kill pids 51762/88661 — they are the node build making progress.
+
+=== 2026-09-14 MONDAY (14 Sep) resume: Node installed, frontend built, app RUNNING ===
+
+Resumed from the 10 Sep checkpoint. The brew-from-source Node build died over
+the break (log + build tree gone, empty 0B keg). Recovery:
+- Cleaned the empty keg; no bottle exists for macOS 26.6.2 x86_64, so instead
+  of ~4h source compile I installed the official PREBUILT Node v26.8.2 tarball
+  (nodejs.org dist, darwin-x64) into /usr/local (bin/node, bin/npm symlink,
+  lib/node_modules, include/node, share docs). node 26.8.2 / npm 11.19.1 /
+  npx on PATH. brew Cellar/node left clean.
+
+Frontend (source/app) — now buildable on THIS machine:
+- Removed @tauri-apps/plugin-path from package.json: does not exist on npm
+  (Tauri 2 path perms are core:path:default; same for the crates.io side).
+- npm install: 97 packages, exact pins in package-lock.json (npm ci reproduces).
+  esbuild postinstall (native binary) explicitly approved.
+- Fixed first-ever typecheck errors in the scaffold:
+  - added src/vite-env.d.ts (vite/client types: ?url worker + *.css imports)
+  - tsconfig.json: dropped the tsconfig.node.json project reference (TS6310)
+  - renderAdapter.ts: rewrote getTextRuns text-layer extraction (typed guard,
+    no unused b/c, transform typed)
+  - store.ts: command() mutation param Promise<unknown> (was Promise<void>)
+  - structuralAdapter.ts: unused Operation import + unused before var
+  - App.tsx: open shortcut awaits the picker properly (non-async handler)
+  - Viewer.tsx: unused store import
+- npm run build (tsc --noEmit && vite build) PASSES.
+- npm run tauri dev: full cold Rust compile of the Tauri host (420 crates,
+  ~8.5 min) succeeded first try; the Stitchup window is UP and serving the
+  built React app from vite on http://localhost:1420. Log: /tmp/tauri-dev.log.
+
+Ledger
+- docs/STAGE0_DEPENDENCY_LEDGER.md §4c added: real SHA-256 (of fresh tarballs
+  from the registry, shasum -a 256) for every direct npm dep, incl. the build
+  toolchain and @types. registry integrity (sha512) is committed in
+  package-lock.json. pdf-lib resolved 1.17.1 (ledger said 1.4.0 — 1.x line).
+  Status-stamp update appended. Full transitive tree: 97 packages, lockfile.
+
+Follow-ups (unchanged for build AIs / next local steps in order)
+1. User: gh auth login, then GitHub upload (git init in repo root, .gitignore
+   build artifacts: node_modules, dist, src-tauri/target, fixtures/generated?,
+   .DS_Store; commit; gh repo create --source . --push).
+2. Run the A-c1..A-c15 acceptance contract + parity sheets (first: open a
+   fixture F-01..F-14 via the running window; rotate/reorder/delete/save-as).
+3. tighten capabilities/default.json, ship a real icon (cargo tauri icon) and
+   flip bundle.active.
+4. Stage gates (redaction/sign/encryption/OCR/PDF-A) remain closed; F-09
+   incremental fixture still deferred.
+
+RESUME NEXT SESSION
+- node/npm ready; app launches with `npm run tauri dev` in source/app.
+- Re-check: source/app/src-tauri/src/commands.rs session semantics,
+  src/adapters/structuralAdapter.ts, docs/STAGE0_ENGINE_INTERFACES.md.
+- App is currently running (pid 2506, target/debug/stitchup) — close before
+  rebuilding (port 1420) or leave it; vite HMR is live.

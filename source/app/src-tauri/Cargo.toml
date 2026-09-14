@@ -1,0 +1,27 @@
+[package]
+name = "stitchup"
+version = "0.1.0"
+description = "Stitchup — clean-room, offline-first PDF editor (Tauri 2 host for stitchup-core)"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+lopdf = "0.44"
+stitchup-core = { path = "../../core" }
+
+[lib]
+name = "stitchup_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "stitchup"
+path = "src/main.rs"

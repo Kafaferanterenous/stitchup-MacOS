@@ -1,0 +1,34 @@
+2026-08-20  Australia/Adelaide
+
+Project 021 PDF editor investigation started in
+`E:\scripts\021_2026_08_18_Stichup_PDF_Editor`.
+
+Read the existing `prompt.txt`. The project is specification-only; there is no
+source tree, dependency lockfile, build, renderer, sample set, or test suite.
+
+Research recorded in `RESEARCH_2026_08_20_PDF_EDITOR_ECOSYSTEM.md`. PDF.js
+(Apache-2.0) is a strong rendering/UI reference, pdf-lib (MIT) is useful for
+page operations/forms/overlays, and QPDF (Apache-2.0) is useful for structural
+PDF transformations. MuPDF is technically excellent but AGPL/commercial, and
+PDFium is powerful but large and complex. No source, package, font, OCR model,
+or binary was downloaded, installed, built, or executed.
+
+Legal boundary: do not copy PDF Gear, Nitro Pro, PDF.js viewer assets, or any
+other project source or distinctive UI. Record exact version, hash, license,
+notices, and linking obligations before adding dependencies. Keep redaction,
+signatures, encryption, OCR, and PDF/A behind separate verified feature gates.
+
+Recommended next priority: create a clean-room document model and Stage 1
+viewer/page-workspace acceptance contract before choosing Tauri/PDF.js versus a
+native renderer.
+
+2026-08-20 — Created `pdf_editor_ai_handoff_prompt.txt` for another AI. It
+contains the staged build plan, PDF engine choices, clean-room legal rules,
+redaction/signature safety requirements, portability tracks, dependency ledger,
+tests, and mandatory multi-AI progress/handover procedure. No implementation,
+download, build, or external integration was started.
+
+RESUME NEXT SESSION
+
+Read `pdf_editor_ai_handoff_prompt.txt`, then create the clean-room document
+model, engine interfaces, sanitized fixture set, and Stage 1 acceptance contract.

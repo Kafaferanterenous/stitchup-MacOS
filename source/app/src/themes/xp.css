@@ -1,0 +1,36 @@
+/* Stitchup default theme — XP-inspired-light (clean-room: original tokens,
+   no copied assets). Contrast-checked for WCAG AA on buttons/menus/status. */
+
+:root {
+  --bg: #eef0ea;
+  --bg-toolbar: #f7f9f4;
+  --bg-viewer: #e4e7e0;
+  --bg-pages: #f3f5ef;
+  --bg-page: #ffffff;
+  --bg-thumb: #ffffff;
+  --bg-thumb-selected: #dcefff;
+  --bg-input: #ffffff;
+  --bg-button: #fdfdfa;
+  --bg-modal: #fbfcfa;
+  --bg-commit: #f2f5f0;
+  --bg-error: #fdeded;
+
+  --fg: #1a1a1a;
+  --fg-muted: #4d4f4a;
+  --fg-on-error: #7a1f1f;
+
+  --border: #b3b6ad;
+  --border-button: #999d93;
+  --border-input: #a4a89e;
+  --border-thumb: #c6cac1;
+  --border-error: #e0b0b0;
+
+  --accent: #2f8cff;
+  --focus: #2f8cff;
+  --ok: #1d7a3c;
+  --err: #b3261e;
+  --warn: #9a5d00;
+
+  --backdrop: rgba(30, 32, 28, 0.45);
+  --shadow: rgba(20, 24, 16, 0.25);
+}

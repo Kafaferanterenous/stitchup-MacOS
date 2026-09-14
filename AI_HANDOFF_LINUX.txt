@@ -1,0 +1,129 @@
+STITCHUP — LINUX BUILD HANDOFF
+==============================
+Created: 2026-09-10  Australia/Adelaide
+For: the AI that builds and verifies the Stitchup desktop app on LINUX.
+
+YOU ARE NOT STARTING A NEW PROJECT. You are joining an ongoing multi-AI project.
+Read everything below IN ORDER before writing any code.
+
+READ FIRST (in this order)
+1. dev_notes.txt                       (live journal, latest checkpoint last)
+2. spec/pdf_editor_ai_handoff_prompt.txt (project rules, stages, LEGAL bounds)
+3. docs/STAGE0_DEPENDENCY_LEDGER.md      (approved deps ONLY — see ledger §3)
+4. docs/STAGE0_DOCUMENT_MODEL.md         (model you must implement)
+5. docs/STAGE0_ENGINE_INTERFACES.md      (interfaces you must implement)
+6. docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md (the contract you must pass)
+7. README.md                             (map of the repo)
+
+REPO STATUS AT HANDOFF (2026-09-10, written on macOS)
+- Stage 0 docs complete. Rust core crate in source/core is DONE and verified:
+  `cargo test` passes, `scripts/generate_fixtures.sh` + `scripts/verify_fixtures.sh`
+  succeed (13 fixtures, F-09 deferred). Run these from the repo ROOT.
+- The desktop host source/app exists as a FULL SCAFFOLD: React/TS frontend
+  (store + adapters + features + three themes) AND src-tauri (Tauri 2) with the
+  Stage-1 commands open_document / page_op / cmd_set_metadata / commit_export /
+  source_hash implemented over stitchup-core and compiling (`cargo check`).
+- The frontend has NOT been npm-installed or built anywhere yet (no Node.js on
+  the authoring machine). YOUR FIRST ACTIONS: install frontend deps per
+  source/app/package.json (record every npm dep + checksum in ledger §4b),
+  `npm ci`, then `npm run tauri dev` / `npm run tauri build`.
+- src-tauri/capabilities/default.json currently grants dialog:default + fs:default
+  (scaffold-broad). Tighten to the Stage-1 minimum as part of your build.
+- Icons: src-tauri/icons/icon.png is a 32x32 placeholder. Generate a real
+  original icon with `cargo tauri icon <source.png>` (clean-room artwork!) and
+  reference it in tauri.conf.json before final packaging.
+- Tauri on Linux needs webkit2gtk/libgtk-3/etc.; record exact package versions.
+
+MISSION
+Build the Stage 1 Stitchup desktop application for Linux, run it against the
+acceptance contract, produce portable artifacts, and fill the LINUX parity
+sheet. The core codebase is cross-platform (Tauri 2 + React/TypeScript + the
+D-0x component set); your job is making that core build/run/package on Linux
+and proving the contract. Do NOT fork the core or build a Linux-only engine.
+
+SHARED CORE RULES (non-negotiable)
+- Implement the interfaces in docs/STAGE0_ENGINE_INTERFACES.md faithfully:
+  OpenDocumentAdapter, RendererAdapter, PageTreeAdapter, MetadataAdapter,
+  CommitAdapter (atomic temp + fsync + rename), ProviderRegistry, CommandBus.
+- Never write to the opened source path. "Save" is always export-to-target.
+  Refuse target == source path (permission_denied). Visible overwrite warning.
+- Deps: ONLY from ledger §3 (D-01..D-09). Anything else (incl. QPDF, PDFium+
+  bindings, pyHanko, tesseract.js, @signpdf) is GATED from this build.
+- Theming: three themes (XP-inspired default, Dark, Blue) with readable contrast
+  on buttons/menus (WCAG spot-check). Independently styled; do not copy
+  Microsoft XP or any retro-theme project artwork.
+- Do NOT copy code from PDF Gear, Nitro/Jumbl, Adobe, or any other editor.
+  No AGPL/GPL components (MuPDF, Ghostscript). Beware transitive deps; run a
+  license check on the final lockfile.
+
+LINUX-SPECIFIC BUILD
+Prerequisites (record exact versions in dev_notes.txt):
+- A clean Debian-based (Debian 12 or Ubuntu 22.04/24.04 LTS) and, if possible,
+  a Fedora/RHEL-based (Fedora 40/44 or AlmaLinux/Rocky) machine, or a CI
+  matrix covering both families — Tauri on Linux needs WebKitGTK (webkit2gtk),
+  libgtk-3, librsvg, patchelf; NTFS/webkit ptrace issues in CI are known —
+  capture exact distro + package versions you actually test on.
+- Rust stable via rustup
+- Node.js LTS + npm; Tauri 2 CLI (@tauri-apps/cli) matching your Tauri crate.
+
+Targets and artifacts (produce at least):
+1. AppImage (portable, standalone) — main deliverable; include WebKitGTK
+   bundling policy defined by your Tauri 2 version, and RECORD the runtime
+   dependency caveat: an AppImage may still need system webkit2gtk libs.
+2. .deb for Debian/Ubuntu x64.
+3. .rpm for Fedora/RHEL x64 (best-effort; record if your toolchain lacks it).
+4. .tar.gz of the unpacked bundle (same behavior as the portable folder).
+5. icon/app metadata: .png + .desktop entry with correct names.
+
+Capabilities file (src-tauri/capabilities/*.json): grant ONLY what Stage 1
+needs (dialog: open/save, fs scoped to an export temp dir, window ops). Keep
+temp-write + atomic-rename in a Rust command; the frontend never touches
+arbitrary paths.
+
+Expected build flow (adapt to your Tauri version, then record):
+  npm ci
+  npm run tauri build
+  # then AppImage/deb/rpm packaging per Tauri bundler or your chosen helpers;
+  # do not invent a second independent build system. If you must use
+  # linuxdeploy/AppImage tooling, record its version + license (Apache-2.0).
+
+VERIFICATION (this is what makes your deliverable count)
+1. Run the full Stage 1 contract: fixtures F-01..F-14 via scripts/generate_fixtures,
+   then A-c1..A-c15 from docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md. Fill the LINUX
+   column of the parity sheet.
+2. Confirm atomic save + overwrite refusal + malformed-file resilience
+   (A-c2,3,4,5,7,8) manually with file-byte checks where automation is limited.
+3. Measure + record: cold start to first painted page, idle memory, F-11 (1000
+   pages) open time + scroll, save-as time, packaged size per artifact.
+4. License scan of the final lockfile (cargo tree --license / npm licenses list
+   or equivalent): confirm only approved D-0x licenses appear; put texts in
+   NOTICES/.
+5. GUI visual sign-off: render F-02 at zoom 1.0 and 3.0 (XCVD/headless or on a
+   real display); confirm no blank/tear. Do NOT ship screenshots containing
+   real document content.
+6. Test on at least one GTK Wayland session and one X11 session if possible;
+   note any WebKit issues as parity gaps, not silent fixes.
+
+DO NOT
+- Run GUI visual comparisons or live external integrations without explicit
+  authorization. Static/structured checks are not live acceptance.
+- Download or bundle anything not on the approved ledger. Record downloads
+  (source, size, sha256, license, scope) in dev_notes.txt.
+- Overwrite or ignore earlier journal entries or other platforms' handoffs.
+- Claim "fully self-contained" if the artifact still needs system webkit2gtk;
+  state the runtime requirement honestly.
+
+BEFORE STOPPING (mandatory)
+1. Append to dev_notes.txt: date/time, machine + toolchain versions, files
+   created/changed, commands + results, tests run/not run, license-check
+   result, all downloads with hashes, risks, deviations, next unfinished item.
+2. Append `RESUME NEXT SESSION` naming re-inspection files/commands.
+3. Record any pinned component outside ledger ranges in the ledger §4 block.
+
+HAND BACK (your final message must contain)
+- What artifacts were produced and where.
+- The LINUX column of the parity sheet (A-c1..A-c15) + non-functional numbers.
+- Exact dep versions + sha256s added to ledger/dev_notes.
+- Runtime dependencies actually required (webkit2gtk version etc.).
+- Anything out of budget or a parity gap vs Windows/macOS notes + the
+  RESUME NEXT SESSION pointer.

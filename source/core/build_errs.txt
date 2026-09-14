@@ -1,0 +1,220 @@
+   Compiling stitchup-core v0.1.0 (/Users/groot/opencode_mac/007_2026_09_10_Stitchup/source/core)
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:102:22
+    |
+102 |         Object::Real(w),
+    |         ------------ ^ expected `f32`, found `f64`
+    |         |
+    |         arguments to this enum variant are incorrect
+    |
+note: tuple variant defined here
+   --> /Users/groot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lopdf-0.44.0/src/object.rs:42:5
+    |
+ 42 |     Real(f32),
+    |     ^^^^
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:103:22
+    |
+103 |         Object::Real(h),
+    |         ------------ ^ expected `f32`, found `f64`
+    |         |
+    |         arguments to this enum variant are incorrect
+    |
+note: tuple variant defined here
+   --> /Users/groot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lopdf-0.44.0/src/object.rs:42:5
+    |
+ 42 |     Real(f32),
+    |     ^^^^
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:135:16
+    |
+135 |         if let Some(d) = pages.as_dict_mut() {
+    |                ^^^^^^^   ------------------- this expression has type `Result<&mut lopdf::Dictionary, lopdf::Error>`
+    |                |
+    |                expected `Result<&mut Dictionary, Error>`, found `Option<_>`
+    |
+    = note: expected enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+               found enum `Option<_>`
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:276:80
+    |
+276 |     if let Some(p) = doc.objects.get_mut(&(page_id.0, page_id.1)).and_then(|o| o.as_dict_mut()) {
+    |                                                                                ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+276 |     if let Some(p) = doc.objects.get_mut(&(page_id.0, page_id.1)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                +++++               +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:280:58
+    |
+280 |         "Fields" => Object::Array(vec![Object::Reference(tf.0), Object::Reference(cb.0)]),
+    |                                        ----------------- ^^^^ expected `(u32, u16)`, found `u32`
+    |                                        |
+    |                                        arguments to this enum variant are incorrect
+    |
+    = note: expected tuple `(u32, u16)`
+                found type `u32`
+note: tuple variant defined here
+   --> /Users/groot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lopdf-0.44.0/src/object.rs:48:5
+    |
+ 48 |     Reference(ObjectId),
+    |     ^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:280:83
+    |
+280 |         "Fields" => Object::Array(vec![Object::Reference(tf.0), Object::Reference(cb.0)]),
+    |                                                                 ----------------- ^^^^ expected `(u32, u16)`, found `u32`
+    |                                                                 |
+    |                                                                 arguments to this enum variant are incorrect
+    |
+    = note: expected tuple `(u32, u16)`
+                found type `u32`
+note: tuple variant defined here
+   --> /Users/groot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lopdf-0.44.0/src/object.rs:48:5
+    |
+ 48 |     Reference(ObjectId),
+    |     ^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:282:67
+    |
+282 | ...(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                ^^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<(u32, u16), Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<(u32, u16), lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+282 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| Some(r.as_reference())).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                                                   +++++                +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:282:136
+    |
+282 | ...get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                              ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+282 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                                                                        +++++               +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:303:58
+    |
+303 |         "Annots" => Object::Array(vec![Object::Reference(note_id.0)]),
+    |                                        ----------------- ^^^^^^^^^ expected `(u32, u16)`, found `u32`
+    |                                        |
+    |                                        arguments to this enum variant are incorrect
+    |
+    = note: expected tuple `(u32, u16)`
+                found type `u32`
+note: tuple variant defined here
+   --> /Users/groot/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lopdf-0.44.0/src/object.rs:48:5
+    |
+ 48 |     Reference(ObjectId),
+    |     ^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:307:80
+    |
+307 |     if let Some(p) = doc.objects.get_mut(&(page_id.0, page_id.1)).and_then(|o| o.as_dict_mut()) {
+    |                                                                                ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+307 |     if let Some(p) = doc.objects.get_mut(&(page_id.0, page_id.1)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                +++++               +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:356:67
+    |
+356 | ...(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                ^^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<(u32, u16), Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<(u32, u16), lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+356 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| Some(r.as_reference())).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                                                   +++++                +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:356:136
+    |
+356 | ...get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                              ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+356 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                                                                        +++++               +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:371:67
+    |
+371 | ...(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                ^^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<(u32, u16), Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<(u32, u16), lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+371 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| Some(r.as_reference())).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                                                   +++++                +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:371:136
+    |
+371 | ...get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                              ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+371 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                                                                        +++++               +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:396:67
+    |
+396 | ...(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                ^^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<(u32, u16), Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<(u32, u16), lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+396 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| Some(r.as_reference())).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                                                                   +++++                +
+
+error[E0308]: mismatched types
+   --> src/bin/generate_fixtures.rs:396:136
+    |
+396 | ...get_mut(&r)).and_then(|o| o.as_dict_mut()) {
+    |                              ^^^^^^^^^^^^^^^ expected `Option<_>`, found `Result<&mut Dictionary, Error>`
+    |
+    = note: expected enum `Option<_>`
+               found enum `Result<&mut lopdf::Dictionary, lopdf::Error>`
+help: try wrapping the expression in `Some`
+    |
+396 |     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| r.as_reference()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| Some(o.as_dict_mut())) {
+    |                                                                                                                                        +++++               +
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `stitchup-core` (bin "generate_fixtures") due to 16 previous errors

@@ -1,0 +1,35 @@
+/* Stitchup blue theme. Tokens override the default (load after xp.css). */
+
+:root {
+  --bg: #e7ecf7;
+  --bg-toolbar: #ccd9f0;
+  --bg-viewer: #d9e2f3;
+  --bg-pages: #e2e9f7;
+  --bg-page: #ffffff;
+  --bg-thumb: #f4f7fd;
+  --bg-thumb-selected: #cfe2ff;
+  --bg-input: #ffffff;
+  --bg-button: #eef3fc;
+  --bg-modal: #f4f8ff;
+  --bg-commit: #dfe8f9;
+  --bg-error: #f6e3e6;
+
+  --fg: #14202e;
+  --fg-muted: #3d4c60;
+  --fg-on-error: #7a2230;
+
+  --border: #9fb2cd;
+  --border-button: #7f93b4;
+  --border-input: #8ba0c0;
+  --border-thumb: #aebfda;
+  --border-error: #d99aa4;
+
+  --accent: #1a6fd1;
+  --focus: #1a6fd1;
+  --ok: #1f7a4d;
+  --err: #c2364a;
+  --warn: #8a6200;
+
+  --backdrop: rgba(20, 30, 46, 0.45);
+  --shadow: rgba(24, 38, 58, 0.3);
+}

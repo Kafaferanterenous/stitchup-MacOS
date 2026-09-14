@@ -1,0 +1,20 @@
+[package]
+name = "stitchup-core"
+version = "0.1.0"
+edition = "2021"
+description = "Stitchup structural core: open/save, page ops, source-hash & atomic-save integrity (D-05 lopdf backend)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+lopdf = "0.44"
+sha2 = "0.10"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+
+[[bin]]
+name = "generate_fixtures"
+path = "src/bin/generate_fixtures.rs"
+
+[[bin]]
+name = "verify_fixtures"
+path = "src/bin/verify_fixtures.rs"

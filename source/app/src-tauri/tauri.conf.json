@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Stitchup",
+  "version": "0.1.0",
+  "identifier": "com.stitchup.editor",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Stitchup — clean-room PDF editor",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 480,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "icon": []
+  }
+}

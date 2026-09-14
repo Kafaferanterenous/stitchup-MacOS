@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Node / frontend
+node_modules/
+dist/
+*.local
+
+# Rust / Tauri
+**/target/
+**/src-tauri/gen/
+**/src-tauri/bundle/
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -1,0 +1,236 @@
+You are joining Project 021, the Stitchup PDF editor project. Multiple AI
+sessions will share this directory. Work must be resumable, reviewable, and
+legally clean.
+
+PROJECT DIRECTORY
+
+E:\scripts\021_2026_08_18_Stichup_PDF_Editor
+
+READ FIRST
+
+1. `prompt.txt`
+2. `RESEARCH_2026_08_20_PDF_EDITOR_ECOSYSTEM.md`
+3. `dev_notes.txt`
+4. `E:\scripts\dev_notes.txt`
+5. Applicable `AGENTS.md` instructions.
+
+Inspect the actual tree and latest journal tail before making assumptions.
+
+PRODUCT GOAL
+
+Build Stitchup, a fast offline-first PDF viewer/editor with a familiar desktop
+layout inspired by common PDF applications, but with independently designed
+visuals. The target is broad useful coverage, portability, and safe output, not
+an unsafe claim of full Acrobat compatibility.
+
+Core goals:
+
+- open and render ordinary PDFs reliably;
+- page thumbnails, search, zoom, fit modes, and text selection;
+- reorder, rotate, delete, insert, split, merge, and extract pages;
+- edit metadata and save-as safely;
+- add non-destructive text boxes, highlights, shapes, ink, images, stamps,
+  and visual signatures;
+- fill existing AcroForms;
+- export a new PDF without destroying the source;
+- provide clear status, undo, cancellation, and recovery behavior;
+- run offline without accounts, telemetry, or cloud services.
+
+LEGAL/CLEAN-ROOM NON-NEGOTIABLES
+
+Do not encroach on anyone else's work.
+
+- Do not copy, translate, port, or line-by-line rewrite PDF Gear, Nitro Pro,
+  VueScan, PDF.js, pdf-lib, QPDF, MuPDF, PDFium, NAPS2, or other source.
+- Do not copy their code, schemas, assets, icons, screenshots, distinctive
+  layout measurements, text, comments, or implementation structure.
+- Use public behavior and general information architecture only, then write
+  independent requirements, interfaces, and implementation.
+- PDF.js is Apache-2.0, but its documentation and third-party files have their
+  own notices. pdf-lib is MIT. QPDF is Apache-2.0. Record all notices.
+- MuPDF is AGPL or commercial. Do not use it in the default product unless the
+  product license/distribution plan is deliberately made compatible or a
+  commercial license is obtained.
+- Treat PDFium as a large dependency with a complex license and third-party
+  notice surface. Do not add it without a dedicated review.
+- Do not add any font, icon, sample PDF, OCR model, codec, or code dependency
+  without recording source, exact version/commit, SHA-256, license,
+  attribution/NOTICE requirements, and redistribution obligations.
+- This is not legal advice. Stop and report uncertainty about copyright,
+  patent, trademark, license compatibility, or provenance instead of guessing.
+
+ARCHITECTURE
+
+Use layers and narrow interfaces:
+
+1. Document model: pages, metadata, object references, permissions, source
+   hash, and non-destructive operation history.
+2. Renderer adapter: PDF.js or a native renderer, selected only after a size,
+   startup, quality, and license experiment.
+3. Structure adapter: page tree operations, metadata, forms, attachments,
+   validation, and save-as.
+4. Overlay layer: text boxes, annotations, shapes, ink, stamps, images, and
+   signature appearances.
+5. Commit/export layer: generate a new PDF, preserve the source, write to a
+   temporary file, validate, then atomically publish.
+6. Optional providers: OCR, QPDF structural operations, cryptographic
+   signatures, compression, and local AI.
+
+Do not make the GUI depend directly on a particular PDF engine. Do not put
+filesystem writes or long PDF operations on the UI thread.
+
+IMPORTANT PDF LIMITATIONS
+
+PDF text is positioned drawing content, not normal flowing document text.
+Do not begin by pretending arbitrary click-to-edit/reflow is solved. Stage 1
+and Stage 2 should use overlay text boxes and preserve original content. Add
+limited original-text replacement only after proving font metrics, encoding,
+clipping, line geometry, and save/reopen behavior with fixtures.
+
+RECOMMENDED IMPLEMENTATION STAGES
+
+Stage 0: design and legal ledger
+
+- write the document model and engine interfaces;
+- define a dependency/provenance ledger;
+- define source-preservation and atomic-save rules;
+- define sanitized fixture PDFs and acceptance tests;
+- choose a project license only after dependency review.
+
+Stage 1: viewer and page workspace
+
+- open PDF and render pages;
+- continuous/single-page view, thumbnails, zoom, fit, search, text selection;
+- page reorder, rotate, delete, insert blank page, split, merge, extract;
+- metadata view/edit;
+- open/save-as with source preservation;
+- undo for page operations;
+- dark, blue, and high-contrast themes with readable font scaling.
+
+Stage 2: safe authoring overlays
+
+- text boxes and free text overlays;
+- highlight, underline, strikeout, shapes, arrows, freehand ink;
+- image and stamp placement;
+- visual signature appearance, clearly distinguished from cryptographic signing;
+- fill existing AcroForms;
+- explicit flatten-overlays export.
+
+Stage 3: security-sensitive features
+
+- redaction that removes underlying text/images from the output object graph;
+- redact preview followed by search/stream/visual verification;
+- encryption/password handling through a reviewed engine;
+- cryptographic signatures using a documented CMS/PKCS#7/X.509 design;
+- warn that any post-sign edit invalidates signatures;
+- PDF/A validation as an evidence-backed report.
+
+Stage 4: optional providers
+
+- OCR with separately licensed language data;
+- compression and image downsampling profiles;
+- Bates numbering;
+- local AI summary/extraction only through an explicit local provider and
+  privacy setting.
+
+INTERFACE
+
+Use a familiar, independently designed desktop layout:
+
+- top command/ribbon area: Open, Save As, Undo, page operations, annotate,
+  forms, redact, sign, export, and search;
+- left thumbnail/navigation pane;
+- center page canvas;
+- right properties/tool pane;
+- bottom page/zoom/status bar;
+- keyboard shortcuts, command search, accessible focus order, visible errors.
+
+Do not copy PDF Gear or Nitro Pro logos, icons, wording, exact dimensions, or
+distinctive artwork. Common toolbar concepts are not owned by one vendor.
+
+PORTABILITY OPTIONS
+
+Track A, fast prototype: Rust core plus Tauri/PDF.js frontend. This is
+cross-platform and productive, but depends on a system WebView and ships
+JavaScript assets. Measure clean-machine behavior and do not call it fully
+self-contained if it needs a WebView runtime.
+
+Track B, strict native package: Rust or C++ native UI plus a measured native
+renderer/backend. This can produce a smaller Windows ZIP but requires more UI
+work. Keep platform code behind adapters.
+
+Do not choose a framework by popularity. Measure startup time, idle memory,
+large-document memory, package size, rendering fidelity, and clean-machine
+launch before deciding.
+
+SECURITY AND DATA SAFETY
+
+- Never overwrite the source PDF by default.
+- Use temporary files and atomic publication.
+- Preserve source hash and operation history.
+- Treat embedded files, JavaScript, links, forms, and external references as
+  untrusted content.
+- Make active content policies explicit and default to safe behavior.
+- Do not send PDFs to a server or cloud service.
+- Do not include private PDFs, real names, signatures, or credentials in tests,
+  logs, screenshots, or fixtures.
+- Redaction must be tested against hidden text, alternate content streams,
+  images, metadata, attachments, incremental revisions, and copy/search.
+
+TESTING
+
+Create sanitized fixtures for:
+
+- text, scanned image, mixed text/image, rotated pages, forms, annotations,
+  embedded fonts, Unicode, encrypted PDFs, malformed PDFs, attachments,
+  incremental updates, and large page counts.
+
+Test:
+
+- render/open/save-as round trips;
+- page order and geometry;
+- overlay placement after zoom/rotation;
+- undo and crash recovery;
+- redaction content removal;
+- signature invalidation warnings;
+- output validation and atomic failure behavior;
+- cold/warm startup, idle memory, large-document memory, and package size.
+
+Do not run GUI visual tests or live external integrations without explicit
+authorization. Static checks are not live acceptance.
+
+MULTI-AI JOURNAL AND HANDOVER RULES
+
+Every session must save progress before stopping.
+
+1. Append to `dev_notes.txt`; never overwrite, truncate, reorder, or silently
+   correct earlier entries.
+2. Include local date/time, working directory, inspected/changed files,
+   commands/results, tests run and not run, license/dependency decisions,
+   risks, and next unfinished priority.
+3. Preserve known-good builds and packages before replacing them.
+4. Record external downloads with source, size, hash, license, and scope.
+5. State explicitly when something is design-only, static-only, unverified,
+   or blocked.
+6. Before stopping, append `RESUME NEXT SESSION` naming the first files and
+   commands the next AI should inspect.
+7. Do not create competing journals or hide important errors in logs.
+
+START NOW
+
+1. Read the project files listed at the top.
+2. Inspect the current tree and latest `dev_notes.txt` entry.
+3. Create the Stage 0 clean-room document model and acceptance contract.
+4. Do not download or install an engine until its exact license, source,
+   expected size, hash/provenance, and modification scope are documented and
+   approved.
+5. Build only the smallest authorized milestone.
+6. Verify changed files and append a handover checkpoint before stopping.
+
+CURRENT CHECKPOINT
+
+As of 2026-08-20, Project 021 has no implementation. Research identifies
+PDF.js, pdf-lib, and QPDF as the most promising permissive references, while
+MuPDF and PDFium require separate legal/size decisions. The next unfinished
+priority is the clean-room document model, engine interfaces, fixture set, and
+Stage 1 viewer/page-workspace acceptance contract.
