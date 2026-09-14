@@ -359,3 +359,36 @@ RESUME NEXT SESSION
   src/adapters/structuralAdapter.ts, docs/STAGE0_ENGINE_INTERFACES.md.
 - App is currently running (pid 2506, target/debug/stitchup) — close before
   rebuilding (port 1420) or leave it; vite HMR is live.
+
+=== 2026-09-14 END-OF-DAY checkpoint (saving progress; pause until next session) ===
+
+Completed today (continuous from the morning resume):
+1. GitHub authed (Kafaferanterenous, keyring; git identity set globally,
+   noreply email).
+2. Repo uploaded as private `Kafaferanterenous/stitchup` (main):
+   - 224f056 Stage 0 + build (75 files) — spec/, docs/, scripts/, source/core,
+     source/app (incl. package-lock.json + Cargo.lock), AI_HANDOFF_*.
+   - cleanup commit dropping source/core/build_errs.txt from tracking
+     (now gitignored via **/build_errs.txt).
+   - .gitignore covers .DS_Store, node_modules, dist, **/target,
+     **/src-tauri/gen, **/src-tauri/bundle, *.log.
+3. Also uploaded to GitHub (all private, one commit each, build artifacts
+   gitignored): audio-commander (131 files incl. vendored DUMB/stb_vorbis),
+   hyperdrive-macos (31 files, GPL-3.0, prebuilt decoder archives in
+   deps/static), weather-dashboard (11 files), gadgets (15 files).
+   Per user direction, Candellum and 004 iOS dashboard are NOT uploaded yet.
+
+App still running this session: Stitchup dev build (target/debug/stitchup,
+vite on :1420). Next session: close it before rebuild or just rely on HMR.
+
+NEXT SESSION (user's pick, in no strong order)
+- Stitchup: open fixture F-01..F-14 in the running app; then A-c1..A-c15 +
+  parity; real icon (cargo tauri icon) + bundle.active; capability tightening;
+  stage gates remain closed (redaction/sign/encryption/OCR/PDF-A).
+- Remaining repos not uploaded: 004_2026_08_25_WeatherDashboard_iOS,
+  006_2026_09_03_Candellum.
+
+RESUME NEXT SESSION
+- node 26.8.2 / npm 11.19.1 ready; gh authed as Kafaferanterenous.
+- To relaunch app: cd source/app && npm run tauri dev (log /tmp/tauri-dev.log).
+- Re-read this checkpoint; then the "NEXT SESSION" line items above.
