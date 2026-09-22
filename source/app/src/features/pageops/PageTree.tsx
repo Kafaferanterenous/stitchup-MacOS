@@ -43,14 +43,14 @@ function Thumb({ pageNo }: { pageNo: number }) {
   );
 }
 
-export function PageTree() {
+function PagesContent() {
   const app = useAppState();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [items, setItems] = useState<number[]>([]);
+  const [sel, setSel] = useState<number[]>([]);
 
   // Keep a local order mirror for drag; it is authoritative for dnd-kit only.
   const order = items.length ? items : app.doc?.pages.map((p) => p.page_no) ?? [];
-  const [sel, setSel] = useState<number[]>([]);
 
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -69,7 +69,7 @@ export function PageTree() {
   }
 
   return (
-    <div className="pages-tree">
+    <>
       <div className="pages-tools">
         <button
           onClick={() => void store.rotate(sel, true)}
@@ -99,10 +99,81 @@ export function PageTree() {
         </SortableContext>
       </DndContext>
       <div className="pages-hint">Drag to reorder · right-click thumb to toggle selection</div>
-    </div>
+    </>
   );
 
   function toggle(pageNo: number) {
     setSel((s) => (s.includes(pageNo) ? s.filter((p) => p !== pageNo) : [...s, pageNo]));
   }
+}
+
+// Bookmark jump button needs the page navigation from the store only.
+function BookmarksContent() {
+  const app = useAppState();
+  const bookmarks = app.doc?.bookmarks ?? [];
+
+  return (
+    <>
+      <div className="pages-tools">
+        <button onClick={() => void store.addBookmark()} title="Add the current page">
+          ＋ Page {app.currentPage}
+        </button>
+        <button
+          onClick={() => void store.clearBookmarks()}
+          disabled={bookmarks.length === 0}
+          title="Remove all bookmarks">
+          Clear
+        </button>
+      </div>
+      <div className="thumb-list">
+        {bookmarks.length === 0 && (
+          <div className="pages-empty">
+            No bookmarks yet — open a document and use “＋ Page N”.
+          </div>
+        )}
+        {bookmarks.map((n) => (
+          <div className="bm-row" key={`bm-${n}`}>
+            <button className="bm-jump" onClick={() => store.goToPage(n)} title={`Go to page ${n}`}>
+              Page {n}
+            </button>
+            <button
+              className="bm-del"
+              onClick={() => void store.removeBookmark(n)}
+              title="Remove bookmark">
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="pages-hint">Bookmarks live in this session only (never written to the PDF)</div>
+    </>
+  );
+}
+
+export function PageTree() {
+  const app = useAppState();
+  const tab = app.paneTab;
+  const count = app.doc?.bookmarks.length ?? 0;
+
+  return (
+    <div className="pages-tree">
+      <div className="pane-tabs" role="tablist" aria-label="Sidebar">
+        <button
+          role="tab"
+          aria-selected={tab === "pages"}
+          className={`pane-tab${tab === "pages" ? " active" : ""}`}
+          onClick={() => store.setPaneTab("pages")}>
+          Pages
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "bookmarks"}
+          className={`pane-tab${tab === "bookmarks" ? " active" : ""}`}
+          onClick={() => store.setPaneTab("bookmarks")}>
+          Bookmarks{count > 0 ? ` (${count})` : ""}
+        </button>
+      </div>
+      {tab === "pages" ? <PagesContent /> : <BookmarksContent />}
+    </div>
+  );
 }

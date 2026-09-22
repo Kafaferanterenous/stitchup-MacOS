@@ -110,6 +110,10 @@ select {
   min-height: 0;
 }
 
+.app-body[data-pane="hidden"] {
+  grid-template-columns: 1fr;
+}
+
 .viewer-pane {
   overflow: hidden;
   display: flex;
@@ -144,6 +148,18 @@ select {
   display: none;
 }
 
+/* side-by-side spread (2-up) */
+.page-spread {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.page-spread .page-view {
+  max-width: 46vw;
+}
+
 .page-error,
 .viewer-error,
 .empty-viewer {
@@ -165,6 +181,29 @@ select {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+.pane-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-tab {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.pane-tab.active {
+  background: var(--bg-thumb-selected);
+  border-color: var(--border);
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .pages-tools {
@@ -220,6 +259,24 @@ select {
 
 .pages-empty {
   padding: 12px;
+  color: var(--fg-muted);
+}
+
+/* bookmark rows in the sidebar */
+.bm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bm-row .bm-jump {
+  flex: 1;
+  text-align: left;
+  padding: 6px 8px;
+}
+
+.bm-row .bm-del {
+  padding: 5px 8px;
   color: var(--fg-muted);
 }
 

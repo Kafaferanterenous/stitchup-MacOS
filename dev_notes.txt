@@ -486,3 +486,16 @@ rotation fidelity still approximated by renderer.
     A-c15 split/extract + merge: extract implemented (cmd_page_op "extract");
          merge not implemented (Stage-open).
     Non-functional budgets + platform parity sheets: not yet recorded.
+
+2026-09-22 (session, part 3) — sidebar + spread view
+- Sidebar now hideable: Toolbar "Sidebar ›/‹ Sidebar" toggle + shortcut
+  meta+shift+p; .app-body grid collapses to 1 column via data-pane.
+- Sidebar gained Pages | Bookmarks tabs (pane-tabs); selecting a tab
+  re-opens the pane (store.setPaneTab force paneOpen). Bookmarks are
+  session-only (Document.bookmarks, never written into the PDF):
+  ＋ current page, jump, ✕ / Clear.
+- View mode cycle is now Single → Spread → Continuous (toolbar select + meta+g).
+  Spread renders 2-up pairs (1, 2-3, 4-5, ...), each page max-width 46vw.
+- Types: ViewMode add "spread"; Document add bookmarks[]; SHORTCUTS add
+  togglePane. npm run build green; tauri dev relaunched for visual check.
+- This round is frontend-only (no Rust changes).

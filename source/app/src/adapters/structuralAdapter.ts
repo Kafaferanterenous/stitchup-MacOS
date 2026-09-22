@@ -30,6 +30,7 @@ export const openDocumentAdapter: OpenDocumentAdapter = {
       passwordRequired: open.password_required,
       warnings: open.warnings,
       bytesB64: open.bytes_b64,
+      bookmarks: [],
       history: [],
       redo: [],
     };

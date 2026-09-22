@@ -63,11 +63,21 @@ export function Toolbar() {
         Edit text
       </button>
       <span className="divider" />
-      <button
-        onClick={() => store.setViewMode(app.viewMode === "continuous" ? "single" : "continuous")}
+      <select
+        aria-label="Page view mode"
+        value={app.viewMode}
+        onChange={(e) => store.setViewMode(e.target.value as typeof app.viewMode)}
         disabled={!app.doc}
-        title="Toggle single/continuous page view">
-        View
+        title="Single page, side-by-side spread, or continuous scroll">
+        <option value="single">Single</option>
+        <option value="spread">Spread</option>
+        <option value="continuous">Continuous</option>
+      </select>
+      <button
+        onClick={() => store.setPaneOpen(!app.paneOpen)}
+        disabled={!app.doc}
+        title={app.paneOpen ? "Hide the sidebar (⌘⇧P)" : "Show the sidebar (⌘⇧P)"}>
+        {app.paneOpen ? "Sidebar ›" : "‹ Sidebar"}
       </button>
       <span className="divider" />
       <select

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppState, store } from "../../store";
 import {
   bind,
@@ -211,15 +211,35 @@ export function Viewer() {
     </div>
   );
 
-  const pages = app.doc.pages.map((p) => (
-    <PageView
-      key={p.page_no}
-      session={session}
-      pageNo={p.page_no}
-      editMode={app.editMode}
-      onPick={setEditTarget}
-    />
-  ));
+  const pageCount = app.doc.pages.length;
+  let body: ReactNode;
+  if (app.viewMode === "single") {
+    body = <PageView session={session} pageNo={app.currentPage} editMode={app.editMode} onPick={setEditTarget} />;
+  } else if (app.viewMode === "spread") {
+    const pairs: number[][] = [];
+    for (let i = 1; i <= pageCount; i += 2) {
+      pairs.push(i < pageCount ? [i, i + 1] : [i]);
+    }
+    body = (
+      <>
+        {pairs.map((pair) => (
+          <div className="page-spread" key={pair.join("-")}>
+            {pair.map((p) => (
+              <PageView key={p} session={session} pageNo={p} editMode={app.editMode} onPick={setEditTarget} />
+            ))}
+          </div>
+        ))}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        {app.doc.pages.map((p) => (
+          <PageView key={p.page_no} session={session} pageNo={p.page_no} editMode={app.editMode} onPick={setEditTarget} />
+        ))}
+      </>
+    );
+  }
 
   const pageMeta = editTarget
     ? app.doc.pages.find((p) => p.page_no === editTarget.pageNo)
@@ -228,7 +248,7 @@ export function Viewer() {
   return (
     <div className="viewer-scroll">
       {app.editMode && overlay}
-      {app.viewMode === "single" ? pages.length ? pages[app.currentPage - 1] : null : pages}
+      {body}
       {editTarget && (
         <EditTextModal
           pageNo={editTarget.pageNo}

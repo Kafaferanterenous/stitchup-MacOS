@@ -28,7 +28,7 @@ export interface AppState {
   currentPage: number;
   zoom: number;
   zoomMode: "fit-page" | "fit-width" | "actual" | "custom";
-  viewMode: "continuous" | "single";
+  viewMode: "single" | "spread" | "continuous";
   busy: boolean;
   lastError: Error | null;
   lastCommit: { target: string; sha: string; size: number } | null;
@@ -36,6 +36,9 @@ export interface AppState {
   metadataOpen: boolean;
   /** Text-edit mode: viewer overlays clickable text runs. */
   editMode: boolean;
+  /** Left pane (thumbnails / bookmarks). */
+  paneOpen: boolean;
+  paneTab: "pages" | "bookmarks";
 }
 
 let state: AppState = {
@@ -50,6 +53,8 @@ let state: AppState = {
   statusMessage: "No document open",
   metadataOpen: false,
   editMode: false,
+  paneOpen: true,
+  paneTab: "pages",
 };
 
 const listeners = new Set<() => void>();
@@ -277,6 +282,44 @@ export const store = {
     set({ viewMode: mode });
   },
 
+  setPaneOpen(open: boolean) {
+    set({ paneOpen: open });
+  },
+
+  setPaneTab(tab: AppState["paneTab"]) {
+    // Selecting a tab also re-opens the pane if it was hidden.
+    set({ paneTab: tab, paneOpen: true });
+  },
+
+  async addBookmark() {
+    const doc = state.doc;
+    if (!doc) return;
+    const n = state.currentPage;
+    if (doc.bookmarks.includes(n)) return;
+    const next: Document = {
+      ...doc,
+      bookmarks: [...doc.bookmarks, n].sort((a, b) => a - b),
+    };
+    set({ doc: next, statusMessage: `Bookmarked page ${n}` });
+  },
+
+  async removeBookmark(n: number) {
+    const doc = state.doc;
+    if (!doc) return;
+    const next: Document = {
+      ...doc,
+      bookmarks: doc.bookmarks.filter((b) => b !== n),
+    };
+    set({ doc: next, statusMessage: "Bookmark removed" });
+  },
+
+  async clearBookmarks() {
+    const doc = state.doc;
+    if (!doc) return;
+    const next: Document = { ...doc, bookmarks: [] };
+    set({ doc: next, statusMessage: "All bookmarks removed" });
+  },
+
   goToPage(n: number) {
     const doc = state.doc;
     if (!doc || n < 1 || n > doc.pages.length) return;
@@ -308,6 +351,7 @@ export const SHORTCUTS = {
   fitWidth: "meta+1",
   actual: "meta+2",
   toggleView: "meta+g",
+  togglePane: "meta+shift+p",
 } as const;
 
 export function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {

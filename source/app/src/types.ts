@@ -103,7 +103,7 @@ export interface TextEditParams {
 }
 
 export type ZoomMode = "fit-page" | "fit-width" | "actual" | "custom";
-export type ViewMode = "continuous" | "single";
+export type ViewMode = "single" | "spread" | "continuous";
 
 export interface SearchResult {
   page_no: number;
@@ -131,6 +131,8 @@ export interface Document {
   warnings: string[];
   /** Base64 opened bytes; the RendererAdapter's input. */
   bytesB64: string;
+  /** Client-side page bookmarks (not persisted into the PDF). */
+  bookmarks: number[];
   /** Live operation stack for the CommandBus (undo/redo). */
   history: Operation[];
   redo: Operation[];

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAppState, store, SHORTCUTS, matchesShortcut } from "./store";
+import type { ViewMode } from "./types";
 import { Toolbar } from "./features/toolbar/Toolbar";
 import { Viewer } from "./features/viewer/Viewer";
 import { PageTree } from "./features/pageops/PageTree";
@@ -7,6 +8,8 @@ import { SearchBar } from "./features/search/SearchBar";
 import { MetadataModal } from "./features/metadata/MetadataModal";
 import { CommitPanel } from "./features/commit/CommitPanel";
 import { MessageBox } from "./features/common/MessageBox";
+
+const CYCLE_VIEW: ViewMode[] = ["single", "spread", "continuous"];
 
 export default function App() {
   const app = useAppState();
@@ -38,7 +41,12 @@ export default function App() {
         store.setZoom(app.zoom, "fit-width");
       } else if (matchesShortcut(e, SHORTCUTS.toggleView)) {
         e.preventDefault();
-        store.setViewMode(app.viewMode === "continuous" ? "single" : "continuous");
+        const modes = CYCLE_VIEW;
+        const next = modes[(modes.indexOf(app.viewMode) + 1) % modes.length];
+        store.setViewMode(next);
+      } else if (matchesShortcut(e, SHORTCUTS.togglePane)) {
+        e.preventDefault();
+        store.setPaneOpen(!app.paneOpen);
       } else if (e.key === "Escape" && app.editMode) {
         e.preventDefault();
         store.setEditMode(false);
@@ -46,19 +54,21 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [app.zoom, app.viewMode]);
+  }, [app.zoom, app.viewMode, app.paneOpen]);
 
   return (
     <div className="app-shell" data-view={app.viewMode}>
       <Toolbar />
       <SearchBar />
-      <main className="app-body">
+      <main className="app-body" data-pane={app.paneOpen ? "open" : "hidden"}>
         <section className="viewer-pane" aria-label="document viewer">
           <Viewer />
         </section>
-        <aside className="pages-pane" aria-label="page thumbnails">
-          <PageTree />
-        </aside>
+        {app.paneOpen && (
+          <aside className="pages-pane" aria-label="page thumbnails">
+            <PageTree />
+          </aside>
+        )}
       </main>
       <footer className="status-bar" role="status">
         <span>
