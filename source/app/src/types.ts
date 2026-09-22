@@ -80,6 +80,7 @@ export interface Operation {
     | "delete"
     | "insert_blank"
     | "extract"
+    | "edit_text"
     | "set_metadata"
     | "open";
   /** Page numbers BEFORE the op (1-based) — revert reference. */
@@ -88,6 +89,17 @@ export interface Operation {
   beforeMeta?: Metadata;
   /** Mutation payload, adapter-specific. */
   data: unknown;
+}
+
+/** Text edit op: white patch + replacement text over `rect` (PDF user space, bottom-left origin, points). */
+export interface TextEditParams {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  font_size: number;
+  new_text: string;
 }
 
 export type ZoomMode = "fit-page" | "fit-width" | "actual" | "custom";
@@ -144,6 +156,7 @@ export interface PageTreeAdapter {
   delete(doc: Document, pageNumbers: number[]): Promise<Operation>;
   insertBlank(doc: Document, afterPage: number, widthPt: number, heightPt: number): Promise<Operation>;
   extract(doc: Document, pageNumbers: number[]): Promise<{ pages: PageState[]; outSourceHash: string }>;
+  editText(doc: Document, params: TextEditParams): Promise<Operation>;
   getPage(doc: Document, pageNumber: number): PageState | undefined;
 }
 

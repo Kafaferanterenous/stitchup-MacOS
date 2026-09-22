@@ -269,6 +269,162 @@ pub fn set_metadata(doc: &mut PdfDoc, meta: &Metadata) -> Result<(), EngineError
 }
 
 // ---------------------------------------------------------------------------
+// Edit / replace text (overlay patch)
+// ---------------------------------------------------------------------------
+
+/// Escape a string for a PDF literal-string `( ... )` text-show operator.
+fn escape_pdf_string(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, '\n' | '\r'))
+        .flat_map(|c| match c {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '(' => "\\(".chars().collect::<Vec<_>>(),
+            ')' => "\\)".chars().collect::<Vec<_>>(),
+            other => vec![other],
+        })
+        .collect()
+}
+
+fn helvetica_font() -> Object {
+    Object::Dictionary(dictionary! {
+        "Type" => Object::Name("Font".into()),
+        "Subtype" => Object::Name("Type1".into()),
+        "BaseFont" => Object::Name("Helvetica".into()),
+        "Encoding" => Object::Name("WinAnsiEncoding".into()),
+    })
+}
+
+/// Append a white patch + replacement text to a page's content stream so the
+/// rendered page shows `new_text` at `rect` instead of the covered original.
+///
+/// Coordinates are PDF user space (points, origin bottom-left), match the
+/// rect the renderer highlighted. The original content stream is left
+/// untouched: we append a fresh, unfiltered stream object and add its
+/// reference to /Contents (single ref -> array, array -> append). This keeps
+/// the patch filter-safe and reversible at the document level.
+pub fn replace_text(
+    doc: &mut PdfDoc,
+    page_no: u32,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    font_size: f64,
+    new_text: &str,
+) -> Result<Vec<PageMeta>, EngineError> {
+    if width <= 0.0 || height <= 0.0 || font_size <= 0.0 || font_size > 1000.0 {
+        return Err(crate::err!(
+            ErrorCode::ValidationFailed,
+            "edit_text needs positive rect + font size"
+        ));
+    }
+    if new_text.trim().is_empty() {
+        return Err(crate::err!(ErrorCode::ValidationFailed, "replacement text is empty"));
+    }
+
+    let pages_map = doc.get_pages();
+    let page_id = pages_map
+        .get(&page_no)
+        .copied()
+        .ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "no page {page_no}"))?;
+
+    let font = helvetica_font();
+    let ops = format!(
+        "q\n1 1 1 rg\n{:.2} {:.2} {:.2} {:.2} re\nf\nQ\nq\nBT\n/StTxt {:.2} Tf\n{:.2} {:.2} Td\n({}) Tj\nET\nQ\n",
+        x, y, width, height,
+        font_size,
+        x, y,
+        escape_pdf_string(new_text)
+    );
+
+    // Pass 1: snapshot the page dict (read-only) so we never hold a page
+    // borrow while mutating doc.objects.
+    let page_snapshot = doc
+        .objects
+        .get(&page_id)
+        .and_then(|o| o.as_dict().ok())
+        .cloned()
+        .ok_or_else(|| crate::err!(ErrorCode::Malformed, "page {page_no} not a dict"))?;
+
+    // Ensure /Resources /Font << /StTxt Helvetica >> exists (keep any existing
+    // fonts). A referenced Resources object is folded into an inline dict so we
+    // can build it without a second concurrent borrow.
+    let resources = match page_snapshot.get(b"Resources") {
+        Ok(Object::Dictionary(d)) => {
+            let mut d = d.clone();
+            let merged = match d.get(b"Font").ok() {
+                Some(Object::Dictionary(fonts)) => {
+                    let mut fonts = fonts.clone();
+                    fonts.set("StTxt", font);
+                    Object::Dictionary(fonts)
+                }
+                _ => Object::Dictionary(dictionary! {
+                    "StTxt" => font,
+                }),
+            };
+            d.set("Font", merged);
+            Object::Dictionary(d)
+        }
+        Ok(Object::Reference(id)) => {
+            let mut d = doc
+                .objects
+                .get(&id)
+                .and_then(|o| o.as_dict().ok())
+                .cloned()
+                .unwrap_or_default();
+            let fonts = match d.get(b"Font").ok() {
+                Some(Object::Dictionary(f)) => {
+                    let mut f = f.clone();
+                    f.set("StTxt", font);
+                    Object::Dictionary(f)
+                }
+                _ => Object::Dictionary(dictionary! {
+                    "StTxt" => font,
+                }),
+            };
+            d.set("Font", fonts);
+            Object::Dictionary(d)
+        }
+        _ => Object::Dictionary(dictionary! {
+            "Font" => Object::Dictionary(dictionary! {
+                "StTxt" => font,
+            }),
+        }),
+    };
+
+    // Pass 2: append a new unfiltered content stream object.
+    let stream_id = doc.add_object(Stream::new(dictionary! {}, ops.into_bytes()));
+
+    // Pass 3: single write borrow on the page dict.
+    let contents = match page_snapshot.get(b"Contents") {
+        Ok(Object::Reference(r)) => {
+            Object::Array(vec![Object::Reference(*r), Object::Reference(stream_id)])
+        }
+        Ok(Object::Array(arr)) => {
+            let mut arr = arr.clone();
+            arr.push(Object::Reference(stream_id));
+            Object::Array(arr)
+        }
+        Err(_) => Object::Reference(stream_id),
+        other => {
+            return Err(crate::err!(
+                ErrorCode::Unsupported,
+                "unsupported /Contents entry for edit_text: {other:?}"
+            ));
+        }
+    };
+    let page = doc
+        .objects
+        .get_mut(&page_id)
+        .and_then(|o| o.as_dict_mut().ok())
+        .ok_or_else(|| crate::err!(ErrorCode::Malformed, "page {page_no} not a dict"))?;
+    page.set("Resources", resources);
+    page.set("Contents", contents);
+
+    crate::model::collect_pages(doc)
+}
+
+// ---------------------------------------------------------------------------
 // Commit / export (atomic save-as)
 // ---------------------------------------------------------------------------
 
@@ -332,4 +488,75 @@ pub fn assert_source_unmodified(source_hash: &str, source_path: &Path) -> Result
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_doc() -> PdfDoc {
+        let mut doc = PdfDoc::with_version("1.5");
+        let content_id = doc.add_object(Stream::new(
+            dictionary! {},
+            b"BT /F1 12 Tf 72 720 Td (Hello World) Tj ET\n".to_vec(),
+        ));
+        let pages_id = doc.add_object(dictionary! {
+            "Type" => Object::Name("Pages".into()),
+            "Kids" => Object::Array(vec![]),
+            "Count" => Object::Integer(0),
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => Object::Name("Page".into()),
+            "Parent" => Object::Reference(pages_id),
+            "Contents" => Object::Reference(content_id),
+            "MediaBox" => Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        });
+        let pages = doc.get_object_mut(pages_id).unwrap().as_dict_mut().unwrap();
+        pages.set("Kids", Object::Array(vec![Object::Reference(page_id)]));
+        pages.set("Count", Object::Integer(1));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => Object::Name("Catalog".into()),
+            "Pages" => Object::Reference(pages_id),
+        });
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        doc
+    }
+
+    #[test]
+    fn replace_text_appends_patch_and_roundtrips() {
+        let mut doc = minimal_doc();
+        let pages = replace_text(&mut doc, 1, 10.0, 700.0, 96.0, 12.5, 12.5, "Edited!").unwrap();
+        assert_eq!(pages.len(), 1);
+
+        let mut data = Vec::new();
+        doc.save_to(&mut data).unwrap();
+        let txt = String::from_utf8_lossy(&data);
+        assert!(txt.contains("(Edited!)"), "replacement text missing");
+        assert!(txt.contains("/StTxt"), "font resource missing");
+        assert!(txt.contains("Tj"), "text-show op missing");
+        assert!(txt.contains("re"), "white patch op missing");
+
+        let reloaded = PdfDoc::load_mem(&data).unwrap();
+        assert_eq!(reloaded.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn replace_text_escapes_specials() {
+        assert_eq!(escape_pdf_string("a\\b(c)d"), "a\\\\b\\(c\\)d");
+        assert_eq!(escape_pdf_string("line1\nline2").contains('\n'), false);
+    }
+
+    #[test]
+    fn replace_text_rejects_bad_input() {
+        let mut doc = minimal_doc();
+        assert!(replace_text(&mut doc, 1, 0.0, 0.0, 0.0, 12.0, 15.0, "x").is_err());
+        assert!(replace_text(&mut doc, 1, 1.0, 1.0, 5.0, 0.0, 15.0, "x").is_err());
+        assert!(replace_text(&mut doc, 1, 1.0, 1.0, 5.0, 12.0, 15.0, "   ").is_err());
+        assert!(replace_text(&mut doc, 99, 1.0, 1.0, 5.0, 12.0, 15.0, "x").is_err());
+    }
 }

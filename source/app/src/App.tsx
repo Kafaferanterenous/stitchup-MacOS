@@ -39,6 +39,9 @@ export default function App() {
       } else if (matchesShortcut(e, SHORTCUTS.toggleView)) {
         e.preventDefault();
         store.setViewMode(app.viewMode === "continuous" ? "single" : "continuous");
+      } else if (e.key === "Escape" && app.editMode) {
+        e.preventDefault();
+        store.setEditMode(false);
       }
     };
     window.addEventListener("keydown", onKey);

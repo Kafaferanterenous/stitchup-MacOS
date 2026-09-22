@@ -74,6 +74,19 @@ export const pageTreeAdapter: PageTreeAdapter = {
     const pages: PageState[] = await cmdPageOps("extract", { pages: pageNumbers });
     return { pages, outSourceHash: "" };
   },
+  async editText(doc, params) {
+    const before = beforePages(doc);
+    await cmdPageOps("edit_text", {
+      page: params.page,
+      x: params.x,
+      y: params.y,
+      width: params.width,
+      height: params.height,
+      font_size: params.font_size,
+      new_text: params.new_text,
+    });
+    return { kind: "edit_text", before, data: params };
+  },
   getPage(doc, pageNumber) {
     return doc.pages.find((p) => p.page_no === pageNumber);
   },

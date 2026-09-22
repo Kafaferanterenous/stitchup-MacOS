@@ -17,3 +17,11 @@ dist/
 
 # Logs
 *.log
+**/build_errs.txt
+
+# Icon targets that are not this platform (tauri icon emits all platforms)
+source/app/src-tauri/icons/android/
+source/app/src-tauri/icons/ios/
+source/app/src-tauri/icons/64x64.png
+source/app/src-tauri/icons/Square*.png
+source/app/src-tauri/icons/StoreLogo.png

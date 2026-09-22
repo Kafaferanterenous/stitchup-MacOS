@@ -5,14 +5,18 @@ Independently designed — inspired by the general workspace of common PDF
 applications (ribbon, thumbnail pane, canvas, properties pane, status bar), not
 a copy of any commercial product.
 
-Status: **Stage 0 (design contract) complete; Stage 1 core built and verified
-on macOS.** The Rust structural core (`source/core`) compiles, its hash tests
-pass, and all 13 fixtures are generated + verified (no Node/npm on this
-machine, and by design the desktop frontend is built first on Windows/Linux —
-see `AI_HANDOFF_WINDOWS.txt` / `AI_HANDOFF_LINUX.txt`). The Tauri 2 + React app
-shell (`source/app`) is scaffolded end-to-end and compiles on the Rust side;
-the Windows/Linux build AIs install frontend deps, build the installer, and
-record npm deps in the ledger.
+Status: **Stage 0 (design contract) complete; Stage 1 built and running on
+macOS.** The Rust structural core (`source/core`) compiles, `cargo test` is
+green, and the fixture set (F-01..F-14, F-09 deferred) is generated + verified.
+The Tauri 2 + React app (`source/app`) builds and runs on this machine
+(`npm run tauri dev`), with viewer/search/zoom, page-tree structural ops
+(reorder/rotate/delete/insert/extract), metadata, atomic export, undo, themes,
+and a first content-level feature: **text editing** (click a text run &
+replace — white-patch + Helvetica overlay via the `edit_text` core op, then
+re-render from the serialized in-memory document). A prebuilt
+`Stitchup.app` is produced by `npm run tauri build` (ad-hoc signed; macOS
+notarization and the Windows/Linux builds remain open work — see the
+`AI_HANDOFF_*.txt` files).
 
 ## Layout
 

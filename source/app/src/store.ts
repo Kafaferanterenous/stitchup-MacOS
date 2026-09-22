@@ -14,14 +14,14 @@
 //! docs/STAGE0_ENGINE_INTERFACES.md §4 `revert`.
 
 import { useSyncExternalStore } from "react";
-import type { Document, Operation } from "./types";
+import type { Document, Operation, TextEditParams } from "./types";
 import {
   commitAdapter,
   metadataAdapter,
   openDocumentAdapter,
   pageTreeAdapter,
 } from "./adapters/structuralAdapter";
-import { cmdPageOps } from "./ipc";
+import { cmdPageOps, cmdRenderBytes } from "./ipc";
 
 export interface AppState {
   doc: Document | null;
@@ -34,6 +34,8 @@ export interface AppState {
   lastCommit: { target: string; sha: string; size: number } | null;
   statusMessage: string;
   metadataOpen: boolean;
+  /** Text-edit mode: viewer overlays clickable text runs. */
+  editMode: boolean;
 }
 
 let state: AppState = {
@@ -47,6 +49,7 @@ let state: AppState = {
   lastCommit: null,
   statusMessage: "No document open",
   metadataOpen: false,
+  editMode: false,
 };
 
 const listeners = new Set<() => void>();
@@ -99,7 +102,15 @@ export const store = {
       const doc = state.doc;
       if (!doc) throw new Error("no document open");
       await mutation(doc);
-      const next = await refreshPages(doc);
+      let next = await refreshPages(doc);
+      if (!next.passwordRequired && !next.encrypted) {
+        try {
+          const rb = await cmdRenderBytes();
+          next = { ...next, bytesB64: rb.bytes_b64 };
+        } catch {
+          // Best-effort: keep the original opened bytes if serialization fails.
+        }
+      }
       set({
         doc: { ...next, history: [...next.history, op], redo: [] },
         statusMessage: `Applied ${op.kind}`,
@@ -151,6 +162,16 @@ export const store = {
     return this.command(
       { kind: "insert_blank", before, data: { after: afterPage, width_pt: widthPt, height_pt: heightPt } },
       () => pageTreeAdapter.insertBlank(doc, afterPage, widthPt, heightPt),
+    );
+  },
+
+  async editText(params: TextEditParams) {
+    const doc = state.doc;
+    if (!doc || doc.passwordRequired || doc.encrypted) return false;
+    const before = doc.pages.map((p) => p.page_no);
+    return this.command(
+      { kind: "edit_text", before, data: params },
+      () => pageTreeAdapter.editText(doc, params),
     );
   },
 
@@ -264,6 +285,10 @@ export const store = {
 
   setMetadataOpen(open: boolean) {
     set({ metadataOpen: open });
+  },
+
+  setEditMode(on: boolean) {
+    set({ editMode: on });
   },
 
   clearError() {

@@ -56,6 +56,14 @@ export function Toolbar() {
       </button>
       <span className="divider" />
       <button
+        onClick={() => store.setEditMode(!app.editMode)}
+        disabled={!app.doc || app.doc.passwordRequired || app.doc.encrypted}
+        className={app.editMode ? "active" : undefined}
+        title="Edit text: click a text line in the document to replace it">
+        Edit text
+      </button>
+      <span className="divider" />
+      <button
         onClick={() => store.setViewMode(app.viewMode === "continuous" ? "single" : "continuous")}
         disabled={!app.doc}
         title="Toggle single/continuous page view">

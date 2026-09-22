@@ -392,3 +392,97 @@ RESUME NEXT SESSION
 - node 26.8.2 / npm 11.19.1 ready; gh authed as Kafaferanterenous.
 - To relaunch app: cd source/app && npm run tauri dev (log /tmp/tauri-dev.log).
 - Re-read this checkpoint; then the "NEXT SESSION" line items above.
+
+2026-09-22 (resumed, Mac host)
+
+STITCHUP TEXT EDITING — STATUS: implemented, app running for visual check.
+Added the first content-level mutation (user: "make sure I can edit text in
+the pdf"). Design: overlay-style replacement — a white patch + Helvetica
+text appended as a NEW unfiltered content stream object (never rewrites the
+original streams), rotated-safe (no FlateDecode decompression needed).
+
+Rust core (`source/core/src/ops.rs`):
+  - `replace_text(doc, page, x, y, width, height, font_size, new_text)`:
+    3-pass (snapshot page dict -> build resources/ops -> single write borrow)
+    to satisfy lopdf borrow rules. /Resources /Font not present -> synthesized
+    `<< /StTxt /Helv ... >>`; adds /Contents reference to array or wraps a
+    single ref into an array. Escapes `\\ ( )`, strips CR/LF from input.
+    Guards: non-positive rect/font size, empty text, missing page.
+  - New tests: `minimal_doc` builder + 3 tests (patch+roundtrip, escaping,
+    bad-input). cargo test now 5/5.
+
+Tauri (`source/app/src-tauri/src/commands.rs` + `lib.rs`):
+  - `page_op` new kind `edit_text` (EditTextPayload). Refuses encrypted docs.
+  - New command `render_bytes()`: serializes the in-memory lopdf doc to base64
+    so pdf.js can rebind/re-render after a mutation. Registered + guarded.
+
+Frontend:
+  - `ipc.ts` cmdRenderBytes; `types.ts` Operation kind "edit_text" + TextEditParams.
+  - `structuralAdapter.ts` editText; `store.ts` command() now refreshes
+    bytesB64 after every successful structural op (renderer rebinds). New
+    `editText()` action + `editMode` in AppState + setEditMode.
+  - `Viewer.tsx`: EditOverlay (clickable pdf.js text-run spans scaled by zoom),
+    EditTextModal (textarea prefilled with the run text, converts top-left
+    viewport rect to PDF user space via page height), Esc cancels.
+  - `Toolbar.tsx` "Edit text" toggle (disabled for protected docs);
+    `global.css` overlay/active/modal-textarea styles.
+
+Verification: cargo test 5/5 (core), cargo check ok (src-tauri), npm run build
+ok (tsc+vite), `npm run tauri dev` compiled (5m34s) and app is RUNNING
+(target/debug/stitchup, vite :1420) — text-edit flow is visually verifiable
+now. NOTE ENV FIX: cargo cannot use the broken Xcode `cc` shim; used
+`PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=.../CLT/usr/bin/clang` for all cargo
+invocations.
+
+KNOWN LIMITS: patch shows white background (not the original ink); non-Latin
+text is unsupported (Helvetica/WinAnsi); undo for edit_text resets to source
+(like delete); render_bytes is disabled for encrypted docs; page-level
+rotation fidelity still approximated by renderer.
+
+2026-09-22 (session, part 2) — packaging + acceptance-check record
+- Real app icon: generated 1024px source (svg -> qlmanage -> png) and ran
+  `npm run tauri icon`; full set in src-tauri/icons (icns+ico+png). Non-macOS
+  icon targets (android/, ios/, Square*, StoreLogo, 64x64) gitignored.
+- Bundle enabled: tauri.conf.json bundle.active=true, targets=["app"],
+  icon list set, window labelled "main", category Productivity.
+- `npm run tauri build` (release) OK in 18m02s; produced
+  Stitchup.app at src-tauri/target/release/bundle/macos/. Built binary is
+  x86_64, Info.plist/iconic correct. Tauri bundler left the app UNSIGNED, so
+  ad-hoc signed it (codesign --force --deep --sign -) and smoke-launched it:
+  launches, stays alive.
+- Prebuilt for release: dist/Stitchup-MacOS-v0.1.0.zip (4.4 MB, contains
+  signed Stitchup.app). Requires macOS "open anyway" on the not-notarized
+  bundle (no Apple Developer ID cert on this host).
+- Acceptance-check record (macOS, honest marks; live visual sign-off pending
+  the user):
+    A-c1 open fixtures: partial — requires manual pass in the running app.
+    A-c2 source-hash invariant: PASS (open_data keeps opened bytes; ops never
+         write disk; commit refuses same-path).
+    A-c3 save-as round trip: PASS by design (atomic commit_export; hash
+         differs; source untouched) — manual reopen check pending.
+    A-c4 atomicity: implemented (temp+fsync+rename, dir fsync, tmp cleanup on
+         error); stress run pending.
+    A-c5 overwrite refusal: PASS in code (commit_export + commitAdapter
+         validate refuse target==source, permission_denied).
+    A-c6 passwords: NOT implemented end-to-end yet (encrypted docs report
+         password_required; unlock flow deferred).
+    A-c7 malformed: core returns structured open_failed/malformed on bad
+         bytes; poisoned-state recovery not yet tested in-app.
+    A-c8 undo/redo: partial — rotate/reorder/metadata exact; delete/insert/
+         edit_text fall back to source reset; redo not yet wired (returns
+         false).
+    A-c9 search: implemented (text-layer substring, wraps); live check
+         pending.
+    A-c10 selection/copy: engine never rewrites text layer; relies on pdf.js
+         text layer (selection absent in current viewer); NOT passing yet.
+    A-c11 render fidelity @zoom 1/3: needs visual sign-off (arks).
+    A-c12 thumbnails + live reorder grid: thumbnail pane exists; parity
+         pending visual.
+    A-c13 metadata display/edit/persist: passes in app (MetadataModal) — save-as
+         reopen check pending.
+    A-c14 insert blank + reopen: implemented; live check pending.
+    A-c15 split/extract + merge: extract implemented (cmd_page_op "extract");
+         merge not implemented (Stage-open).
+    Non-functional budgets + platform parity sheets: not yet recorded.

@@ -351,3 +351,59 @@ select {
   z-index: 60;
   max-width: 60vw;
 }
+
+/* text-edit mode */
+button.active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--accent);
+}
+
+.viewer-hint {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--bg-toolbar);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.edit-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.edit-overlay-on .text-run-edit {
+  pointer-events: auto;
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 2px;
+  cursor: text;
+  transition: background 120ms ease;
+}
+
+.edit-overlay-on .text-run-edit:hover {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  outline: 1px solid var(--accent);
+}
+
+.modal textarea.edit-input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  resize: vertical;
+}
+
+.edit-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+}

@@ -39,3 +39,8 @@ export async function cmdCommit(target: string, overwrite: boolean): Promise<Com
 export async function cmdSourceHash(): Promise<{ source_hash: string }> {
   return cmd<{ source_hash: string }>("source_hash");
 }
+
+/** Serialize the CURRENT in-memory document so the viewer can rebind/re-render. */
+export async function cmdRenderBytes(): Promise<{ bytes_b64: string }> {
+  return cmd<{ bytes_b64: string }>("render_bytes");
+}

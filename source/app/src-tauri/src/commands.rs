@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stitchup_core::error::{EngineError, ErrorCode};
 use stitchup_core::model::{collect_pages, read_metadata, Metadata, PageMeta};
-use stitchup_core::ops::{assert_source_unmodified, commit_export as core_commit, delete_pages, extract, insert_blank, open_bytes, reorder, rotate_pages, set_metadata as ops_set_metadata};
+use stitchup_core::ops::{assert_source_unmodified, commit_export as core_commit, delete_pages, extract, insert_blank, open_bytes, reorder, replace_text, rotate_pages, set_metadata as ops_set_metadata};
 
 /// In-memory session: the ONE document the UI is working on.
 #[derive(Default)]
@@ -134,6 +134,27 @@ pub fn page_op(
             let doc = g.doc.as_mut().ok_or_else(no_doc)?;
             delete_pages(doc, &d.pages)
         }
+        "edit_text" => {
+            let d: EditTextPayload = serde_json::from_value(data).map_err(validation)?;
+            let mut g = lock(&st)?;
+            let doc = g.doc.as_mut().ok_or_else(no_doc)?;
+            if doc.is_encrypted() || doc.was_encrypted() {
+                return Err(EngineError::new(
+                    ErrorCode::PermissionDenied,
+                    "text editing is disabled for encrypted documents",
+                ));
+            }
+            replace_text(
+                doc,
+                d.page,
+                d.x,
+                d.y,
+                d.width,
+                d.height,
+                d.font_size,
+                &d.new_text,
+            )
+        }
         "insert_blank" => {
             let d: InsertPayload = serde_json::from_value(data).map_err(validation)?;
             let mut g = lock(&st)?;
@@ -215,6 +236,27 @@ pub fn source_hash(
     Ok(HashMap::from([("source_hash".to_string(), hash)]))
 }
 
+/// Serialize the CURRENT in-memory document (mutations included) so the
+/// renderer can rebind to the patched bytes after an edit. Encrypted docs are
+/// refused — pdf.js cannot decrypt the /Encrypt streams we'd write out.
+#[tauri::command]
+pub fn render_bytes(
+    st: tauri::State<'_, Mutex<SessionState>>,
+) -> Result<HashMap<String, String>, EngineError> {
+    let mut g = lock(&st)?;
+    let doc = g.doc.as_mut().ok_or_else(no_doc)?;
+    if doc.is_encrypted() || doc.was_encrypted() {
+        return Err(EngineError::new(
+            ErrorCode::PermissionDenied,
+            "render refresh is disabled for encrypted documents",
+        ));
+    }
+    let mut data = Vec::new();
+    doc.save_to(&mut data)
+        .map_err(|e| EngineError::new(ErrorCode::IoError, format!("serialize: {e}")))?;
+    Ok(HashMap::from([("bytes_b64".to_string(), B64.encode(&data))]))
+}
+
 fn no_doc() -> EngineError {
     EngineError::new(ErrorCode::OpenFailed, "no document open")
 }
@@ -244,6 +286,17 @@ struct InsertPayload {
     after: u32,
     width_pt: f64,
     height_pt: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct EditTextPayload {
+    page: u32,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    font_size: f64,
+    new_text: String,
 }
 
 fn validation(e: serde_json::Error) -> EngineError {

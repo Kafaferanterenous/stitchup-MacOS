@@ -1,14 +1,138 @@
 import { useEffect, useRef, useState } from "react";
-import { useAppState } from "../../store";
+import { useAppState, store } from "../../store";
 import {
   bind,
   renderPage,
   unbind,
+  getTextRuns,
   RenderSession,
   RenderedPage,
 } from "../../adapters/renderAdapter";
+import type { TextRun } from "../../types";
 
-function PageView({ session, pageNo }: { session: RenderSession; pageNo: number }) {
+interface EditPick {
+  pageNo: number;
+  run: TextRun;
+}
+
+function EditOverlay({
+  session,
+  pageNo,
+  zoom,
+  onPick,
+}: {
+  session: RenderSession;
+  pageNo: number;
+  zoom: number;
+  onPick: (pick: EditPick) => void;
+}) {
+  const [runs, setRuns] = useState<TextRun[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getTextRuns(session, pageNo)
+      .then((r) => alive && setRuns(r))
+      .catch((e) => alive && setErr(String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [session, pageNo]);
+
+  if (err) return null;
+  return (
+    <div className="edit-overlay edit-overlay-on">
+      {runs.map((run, i) => (
+        <span
+          key={i}
+          className="text-run-edit"
+          style={{
+            left: run.rect.x * zoom,
+            top: run.rect.y * zoom,
+            width: run.rect.width * zoom,
+            height: run.rect.height * zoom,
+          }}
+          title={run.str}
+          onClick={() => onPick({ pageNo, run })}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EditTextModal({
+  pageNo,
+  run,
+  pageHeightPt,
+  onCancel,
+}: {
+  pageNo: number;
+  run: TextRun;
+  pageHeightPt: number;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(run.str);
+  const [busy, setBusy] = useState(false);
+
+  async function apply() {
+    const cleaned = text.trim();
+    if (!cleaned) return;
+    setBusy(true);
+    // rect is top-left origin (viewport pts); convert to PDF user space.
+    const y = pageHeightPt - run.rect.y - run.rect.height;
+    const ok = await store.editText({
+      page: pageNo,
+      x: run.rect.x,
+      y,
+      width: run.rect.width,
+      height: run.rect.height,
+      font_size: Math.max(4, run.rect.height),
+      new_text: cleaned,
+    });
+    setBusy(false);
+    if (ok) onCancel();
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-label="Replace text" onClick={(e) => e.stopPropagation()}>
+        <h2>Replace text (page {pageNo})</h2>
+        <label>
+          Replacement text
+          <textarea
+            className="edit-input"
+            rows={3}
+            value={text}
+            autoFocus
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && onCancel()}
+          />
+        </label>
+        <p className="muted edit-note">
+          Rendered over the original with a white patch + Helvetica at font size {Math.max(4, run.rect.height).toFixed(1)} pt.
+        </p>
+        <div className="modal-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button onClick={() => void apply()} disabled={!text.trim() || busy}>
+            {busy ? "Applying…" : "Apply"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PageView({
+  session,
+  pageNo,
+  editMode,
+  onPick,
+}: {
+  session: RenderSession;
+  pageNo: number;
+  editMode: boolean;
+  onPick: (pick: EditPick) => void;
+}) {
   const app = useAppState();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [rendered, setRendered] = useState<RenderedPage | null>(null);
@@ -19,7 +143,7 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
 
   useEffect(() => {
     let alive = true;
-    const scale = app.zoomMode === "actual" ? app.zoom : app.zoom;
+    const scale = app.zoom;
     renderPage(session, pageNo, scale, rotation)
       .then((r) => {
         if (!alive) return;
@@ -42,6 +166,7 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
     >
       <canvas ref={canvasRef} width={rendered?.sizePx.width} height={rendered?.sizePx.height} />
       {err && <div className="page-error">{err}</div>}
+      {editMode && !err && <EditOverlay session={session} pageNo={pageNo} zoom={app.zoom} onPick={onPick} />}
     </div>
   );
 }
@@ -50,6 +175,7 @@ export function Viewer() {
   const app = useAppState();
   const [session, setSession] = useState<RenderSession | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<EditPick | null>(null);
 
   useEffect(() => {
     if (!app.doc) {
@@ -79,19 +205,41 @@ export function Viewer() {
     return <div className="empty-viewer">Parsing document…</div>;
   }
 
-  if (app.viewMode === "single") {
-    return (
-      <div className="viewer-scroll">
-        <PageView key={app.currentPage} session={session} pageNo={app.currentPage} />
-      </div>
-    );
-  }
+  const overlay = app.editMode && (
+    <div className="viewer-hint">
+      Click a highlighted line to replace its text · Esc to cancel
+    </div>
+  );
+
+  const pages = app.doc.pages.map((p) => (
+    <PageView
+      key={p.page_no}
+      session={session}
+      pageNo={p.page_no}
+      editMode={app.editMode}
+      onPick={setEditTarget}
+    />
+  ));
+
+  const pageMeta = editTarget
+    ? app.doc.pages.find((p) => p.page_no === editTarget.pageNo)
+    : undefined;
 
   return (
     <div className="viewer-scroll">
-      {app.doc.pages.map((p) => (
-        <PageView key={p.page_no} session={session} pageNo={p.page_no} />
-      ))}
+      {app.editMode && overlay}
+      {app.viewMode === "single" ? pages.length ? pages[app.currentPage - 1] : null : pages}
+      {editTarget && (
+        <EditTextModal
+          pageNo={editTarget.pageNo}
+          run={editTarget.run}
+          pageHeightPt={pageMeta?.height_pt ?? 792}
+          onCancel={() => {
+            setEditTarget(null);
+            store.setEditMode(false);
+          }}
+        />
+      )}
     </div>
   );
 }
