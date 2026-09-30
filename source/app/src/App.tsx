@@ -8,6 +8,7 @@ import { SearchBar } from "./features/search/SearchBar";
 import { MetadataModal } from "./features/metadata/MetadataModal";
 import { CommitPanel } from "./features/commit/CommitPanel";
 import { MessageBox } from "./features/common/MessageBox";
+import { PasswordDialog } from "./features/common/PasswordDialog";
 
 const CYCLE_VIEW: ViewMode[] = ["single", "spread", "continuous"];
 
@@ -26,7 +27,7 @@ export default function App() {
         void store.undo();
       } else if (matchesShortcut(e, SHORTCUTS.redo)) {
         e.preventDefault();
-        store.redo();
+        void store.redo();
       } else if (matchesShortcut(e, SHORTCUTS.zoomIn)) {
         e.preventDefault();
         store.setZoom(app.zoom * 1.1, "custom");
@@ -87,6 +88,7 @@ export default function App() {
         </span>
       </footer>
       <MetadataModal open={app.metadataOpen} />
+      <PasswordDialog />
       <CommitPanel />
       <MessageBox />
     </div>

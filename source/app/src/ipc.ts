@@ -29,7 +29,23 @@ export async function cmdPageOps(kind: string, data: unknown): Promise<PageMeta[
 }
 
 export async function cmdSetMetadata(meta: Metadata): Promise<PageMeta[]> {
-  return cmd<PageMeta[]>("set_metadata", { meta });
+  return cmd<PageMeta[]>("cmd_set_metadata", { meta });
+}
+
+export async function cmdUndo(): Promise<PageMeta[]> {
+  return cmd<PageMeta[]>("undo");
+}
+
+export async function cmdRedo(): Promise<PageMeta[]> {
+  return cmd<PageMeta[]>("redo");
+}
+
+export async function cmdUnlock(password: string): Promise<OpenPayload> {
+  return cmd<OpenPayload>("unlock_document", { password });
+}
+
+export async function cmdMerge(path: string): Promise<PageMeta[]> {
+  return cmd<PageMeta[]>("merge_document", { path });
 }
 
 export async function cmdCommit(target: string, overwrite: boolean): Promise<CommitResult> {

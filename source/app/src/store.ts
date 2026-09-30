@@ -1,27 +1,23 @@
 //! Tiny app store + CommandBus around the adapters.
 //!
-//! Undo/redo (A-c8): the Rust core mutates structure in place and does not yet
-//! journal Operations, so exact multi-step undo is *not* available in this
-//! scaffold. Stage 1 semantics here are honest and exact where cheap:
-//!   - rotate: re-apply the inverse rotation (exact inverse).
-//!   - reorder: re-apply the captured `before` order (exact inverse).
-//!   - set_metadata: restore the previous metadata snapshot (exact inverse).
-//!   - delete/insert_blank/extract: re-open the source (source bytes are
-//!     untouched by structure ops => exact reset to original, but drops any
-//!     earlier rotations). 
-//! The build AIs will implement the true OperationLog on the Rust command layer
-//! (Stage 1.5) so sequential undo/redo across a mixed sequence is exact; see
-//! docs/STAGE0_ENGINE_INTERFACES.md §4 `revert`.
+//! Undo/redo (A-c8): the Rust core journals an exact before/after snapshot
+//! (`stitchup_core::oplog`) around every structural mutation, so undo/redo here
+//! are thin `undo`/`redo` IPC calls — a mixed sequence (reorder + rotate +
+//! delete + insert + edit_text + set_metadata + merge) reverts EXACTLY at every
+//! step. The frontend `history`/`redo` Operation stacks are mirrors kept only
+//! so the toolbar can enable/disable the buttons; the Rust `OpLog` is the
+//! source of truth.
 
 import { useSyncExternalStore } from "react";
 import type { Document, Operation, TextEditParams } from "./types";
 import {
   commitAdapter,
+  documentFromOpen,
   metadataAdapter,
   openDocumentAdapter,
   pageTreeAdapter,
 } from "./adapters/structuralAdapter";
-import { cmdPageOps, cmdRenderBytes } from "./ipc";
+import { cmdOpen, cmdRedo, cmdRenderBytes, cmdUndo, cmdUnlock } from "./ipc";
 
 export interface AppState {
   doc: Document | null;
@@ -39,6 +35,8 @@ export interface AppState {
   /** Left pane (thumbnails / bookmarks). */
   paneOpen: boolean;
   paneTab: "pages" | "bookmarks";
+  /** Password prompt for a protected document (A-c6). */
+  unlockOpen: boolean;
 }
 
 let state: AppState = {
@@ -55,6 +53,7 @@ let state: AppState = {
   editMode: false,
   paneOpen: true,
   paneTab: "pages",
+  unlockOpen: false,
 };
 
 const listeners = new Set<() => void>();
@@ -78,13 +77,24 @@ export function useAppState(): AppState {
 }
 
 async function refreshPages(doc: Document): Promise<Document> {
-  const { cmdOpen } = await import("./ipc");
-  const fresh = await cmdOpen(doc.path);
-  return {
-    ...doc,
-    pages: fresh.pages.map((p) => ({ ...p })),
-    metadata: fresh.metadata,
-  };
+  return documentFromOpen(await cmdOpen(doc.path), doc);
+}
+
+/** Re-serialize the mutated document so the renderer rebinds to it. */
+async function withFreshBytes(doc: Document): Promise<Document> {
+  if (doc.passwordRequired || doc.encrypted) return doc;
+  try {
+    const rb = await cmdRenderBytes();
+    return { ...doc, bytesB64: rb.bytes_b64 };
+  } catch {
+    // Best-effort: keep the last known bytes if serialization fails.
+    return doc;
+  }
+}
+
+/** Keep the page index inside the (possibly shorter) document. */
+function clampPage(doc: Document, wanted: number): number {
+  return Math.min(Math.max(1, wanted), Math.max(1, doc.pages.length));
 }
 
 export const store = {
@@ -92,12 +102,44 @@ export const store = {
     set({ busy: true, lastError: null });
     try {
       const doc = await openDocumentAdapter.open(path);
-      set({ doc, currentPage: 1, statusMessage: `Opened ${doc.pages.length} pages` });
+      set({
+        doc,
+        currentPage: 1,
+        editMode: false,
+        unlockOpen: doc.passwordRequired,
+        statusMessage: doc.passwordRequired
+          ? "This document is password-protected"
+          : `Opened ${doc.pages.length} pages`,
+      });
     } catch (e) {
       set({ lastError: e as Error, statusMessage: "Open failed" });
     } finally {
       set({ busy: false });
     }
+  },
+
+  /** Supply the document password (A-c6); clears the password gate on success. */
+  async unlock(password: string) {
+    set({ busy: true, lastError: null });
+    try {
+      const doc = documentFromOpen(await cmdUnlock(password));
+      set({
+        doc,
+        currentPage: 1,
+        unlockOpen: false,
+        statusMessage: `Unlocked ${doc.pages.length} pages`,
+      });
+      return true;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Unlock failed" });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  setUnlockOpen(open: boolean) {
+    set({ unlockOpen: open });
   },
 
   /** Run a PageTreeAdapter mutation and record its Operation. */
@@ -108,16 +150,10 @@ export const store = {
       if (!doc) throw new Error("no document open");
       await mutation(doc);
       let next = await refreshPages(doc);
-      if (!next.passwordRequired && !next.encrypted) {
-        try {
-          const rb = await cmdRenderBytes();
-          next = { ...next, bytesB64: rb.bytes_b64 };
-        } catch {
-          // Best-effort: keep the original opened bytes if serialization fails.
-        }
-      }
+      next = await withFreshBytes(next);
       set({
         doc: { ...next, history: [...next.history, op], redo: [] },
+        currentPage: clampPage(next, state.currentPage),
         statusMessage: `Applied ${op.kind}`,
       });
       return true;
@@ -180,6 +216,17 @@ export const store = {
     );
   },
 
+  /** Append another PDF's pages to this document (A-c15). */
+  async merge(path: string) {
+    const doc = state.doc;
+    if (!doc || doc.passwordRequired) return false;
+    const before = doc.pages.map((p) => p.page_no);
+    return this.command(
+      { kind: "merge", before, data: { path } },
+      () => pageTreeAdapter.merge(doc, path),
+    );
+  },
+
   async extract(pages: number[]) {
     const out = await pageTreeAdapter.extract(
       state.doc!,
@@ -188,36 +235,19 @@ export const store = {
     return out;
   },
 
-  /** Undo — exact inverses where possible; see module doc. */
+  /** Undo the last structural mutation — exact restore (A-c8). */
   async undo(): Promise<boolean> {
     const doc = state.doc;
-    const op = doc?.history.at(-1);
-    if (!doc || !op) return false;
+    if (!doc || doc.passwordRequired || doc.history.length === 0) return false;
+    const op = doc.history.at(-1)!;
     set({ busy: true, lastError: null });
     try {
-      if (op.kind === "rotate") {
-        const d = op.data as { pages: number[]; cw: boolean };
-        await cmdPageOps("rotate", { pages: d.pages, cw: !d.cw });
-      } else if (op.kind === "reorder") {
-        await cmdPageOps("reorder", { new_order: op.before });
-      } else if (op.kind === "delete") {
-        // Exact reset to the original source (structural ops never wrote disk).
-        const fresh = await openDocumentAdapter.open(doc.path);
-        const next = { ...fresh, history: doc.history.slice(0, -1), redo: [op] };
-        set({ doc: next, statusMessage: "Undid delete (source reset)" });
-        return true;
-      } else if (op.kind === "set_metadata") {
-        await metadataAdapter.set(doc, op.beforeMeta?? {});
-        // handled by refresh below
-      } else {
-        const fresh = await openDocumentAdapter.open(doc.path);
-        const next = { ...fresh, history: doc.history.slice(0, -1), redo: [op] };
-        set({ doc: next, statusMessage: `Undid ${op.kind} (source reset)` });
-        return true;
-      }
-      const next = await refreshPages(doc);
+      await cmdUndo();
+      let next = await refreshPages(doc);
+      next = await withFreshBytes(next);
       set({
-        doc: { ...next, history: doc.history.slice(0, -1), redo: [op] },
+        doc: { ...next, history: doc.history.slice(0, -1), redo: [...doc.redo, op] },
+        currentPage: clampPage(next, state.currentPage),
         statusMessage: `Undid ${op.kind}`,
       });
       return true;
@@ -229,10 +259,28 @@ export const store = {
     }
   },
 
-  redo(): boolean {
-    // Replay of a captured Operation payload; wired here for the AIs to fill
-    // out with the Rust op-log (mirror of undo).
-    return false;
+  /** Redo the most recently undone mutation — exact replay (A-c8). */
+  async redo(): Promise<boolean> {
+    const doc = state.doc;
+    if (!doc || doc.passwordRequired || doc.redo.length === 0) return false;
+    const op = doc.redo.at(-1)!;
+    set({ busy: true, lastError: null });
+    try {
+      await cmdRedo();
+      let next = await refreshPages(doc);
+      next = await withFreshBytes(next);
+      set({
+        doc: { ...next, history: [...doc.history, op], redo: doc.redo.slice(0, -1) },
+        currentPage: clampPage(next, state.currentPage),
+        statusMessage: `Redid ${op.kind}`,
+      });
+      return true;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Redo failed" });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
   },
 
   async commit(target: string, overwrite: boolean) {
@@ -257,21 +305,29 @@ export const store = {
   async updateMetadata(updates: Parameters<typeof metadataAdapter.set>[1]) {
     const doc = state.doc;
     if (!doc) return;
-    const prev = doc.metadata;
-    await metadataAdapter.set(doc, updates);
-    const next = await refreshPages(doc);
-    set({
-      doc: {
-        ...next,
-        metadata: { ...next.metadata, ...updates },
-        history: [
-          ...next.history,
-          { kind: "set_metadata", before: next.pages.map((p) => p.page_no), beforeMeta: prev, data: updates },
-        ],
-        redo: [],
-      },
-      statusMessage: "Metadata updated",
-    });
+    set({ busy: true, lastError: null });
+    try {
+      const prev = doc.metadata;
+      await metadataAdapter.set(doc, updates);
+      let next = await refreshPages(doc);
+      next = await withFreshBytes(next);
+      set({
+        doc: {
+          ...next,
+          metadata: { ...next.metadata, ...updates },
+          history: [
+            ...next.history,
+            { kind: "set_metadata", before: next.pages.map((p) => p.page_no), beforeMeta: prev, data: updates },
+          ],
+          redo: [],
+        },
+        statusMessage: "Metadata updated",
+      });
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Metadata update failed" });
+    } finally {
+      set({ busy: false });
+    }
   },
 
   setZoom(z: number, mode: AppState["zoomMode"]) {

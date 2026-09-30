@@ -15,17 +15,47 @@ export function Toolbar() {
     }
   }
 
+  async function pickAndMerge() {
+    const chosen = await open({
+      multiple: false,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (typeof chosen === "string") {
+      await store.merge(chosen);
+    }
+  }
+
+  const locked = !app.doc || app.doc.passwordRequired;
+
   return (
     <header className="toolbar" role="toolbar" aria-label="main toolbar">
       <button onClick={pickAndOpen} disabled={app.busy}>
         Open…
       </button>
+      {app.doc?.passwordRequired && (
+        <button onClick={() => store.setUnlockOpen(true)} disabled={app.busy} className="warn">
+          Unlock…
+        </button>
+      )}
       <span className="divider" />
-      <button onClick={() => void store.undo()} disabled={!app.doc || app.busy}>
+      <button
+        onClick={() => void store.undo()}
+        disabled={locked || app.busy || app.doc?.history.length === 0}
+        title="Undo the last structural change (⌘Z)">
         Undo
       </button>
-      <button onClick={() => store.redo()} disabled={!app.doc || app.busy}>
+      <button
+        onClick={() => void store.redo()}
+        disabled={locked || app.busy || app.doc?.redo.length === 0}
+        title="Redo (⌘⇧Z)">
         Redo
+      </button>
+      <span className="divider" />
+      <button
+        onClick={pickAndMerge}
+        disabled={locked || app.busy}
+        title="Append the pages of another PDF to this document">
+        Merge…
       </button>
       <span className="divider" />
       <button

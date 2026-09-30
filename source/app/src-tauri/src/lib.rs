@@ -4,7 +4,7 @@
 //! returns CURRENT session state for the opened path (so refreshPages sees
 //! in-memory mutations, never a stale disk re-read).
 
-mod commands;
+pub mod commands;
 
 use commands::SessionState;
 
@@ -21,7 +21,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_document,
             commands::page_op,
+            commands::merge_document,
             commands::cmd_set_metadata,
+            commands::undo,
+            commands::redo,
+            commands::unlock_document,
             commands::commit_export,
             commands::source_hash,
             commands::render_bytes,

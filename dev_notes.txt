@@ -499,3 +499,68 @@ rotation fidelity still approximated by renderer.
 - Types: ViewMode add "spread"; Document add bookmarks[]; SHORTCUTS add
   togglePane. npm run build green; tauri dev relaunched for visual check.
 - This round is frontend-only (no Rust changes).
+
+2026-09-30 (session) — Stage 1.5: exact op-log undo/redo, passwords, merge
+Resumed the batch left uncommitted on 2026-09-22 (Rust oplog + commands) and
+finished the FRONTEND half, which was never wired.
+
+RUST CORE (source/core):
+- NEW src/oplog.rs — Snapshot {kids, cloned page dicts, /Info} + OpRecord
+  {label, before, after} + OpLog {undo, redo}. snapshot()/apply() do a
+  full-state replacement, so ANY mixed op sequence (reorder+rotate+delete+
+  insert+edit_text+set_metadata+merge) reverts EXACTLY at every step; a new
+  mutation clears redo (branching-editor semantics). Page object ids are
+  stable and never GC'd, so re-inserted kid refs always resolve.
+- ops.rs: merge_doc(doc, other) appends another PDF's page tree; unlock helper;
+  F-08 fixture regenerated smaller (337 B).
+- tests/stage1.rs: 9 acceptance tests (a_c1..a_c8, a_c15) + tests/dbg_esave.rs
+  for the encrypted-save path. cargo test 9/9 + 1/1 green.
+
+TAURI COMMAND LAYER (src-tauri/src/commands.rs):
+- NEW commands: merge_document, undo, redo, unlock_document (+ registered in
+  lib.rs invoke_handler). All mutations now run through logged(), which
+  brackets before/after snapshots.
+- unlock_document: lopdf LoadOptions.password -> core_unlock fallback ->
+  verifies the page tree is non-empty before committing the session; the
+  session deliberately holds doc: None while password-gated.
+- merge_document: refuses merging a file onto itself, refuses an encrypted
+  source (unlock it in its own session first).
+- REFACTOR (testability): every command is now a one-line delegate to a
+  `*_inner(&Mutex<SessionState>, ..)` twin taking the session directly instead
+  of tauri::State, so the whole IPC surface is callable headlessly in tests.
+  `pub mod commands` in lib.rs.
+- ipc.ts: fixed the set_metadata command name (cmd_set_metadata), added
+  cmdUndo/cmdRedo/cmdUnlock/cmdMerge.
+
+FRONTEND:
+- store.ts: undo()/redo() are now thin cmdUndo/cmdRedo calls (exact, all op
+  kinds) instead of the old per-kind inverse hacks; doc.history/redo are
+  mirrors that only drive button enablement. New store.unlock(password),
+  store.merge(path), store.setUnlockOpen. withFreshBytes() + clampPage()
+  helpers; refreshPages() keeps bookmarks/history/redo via documentFromOpen()
+  (new shared mapper in structuralAdapter).
+- types.ts: Operation kind + "merge"; PageTreeAdapter.merge().
+- New features/common/PasswordDialog.tsx (A-c6 prompt, autofocus, Esc-free
+  cancel). Toolbar: Undo/Redo enablement, "Merge…" (dialog plugin), "Unlock…"
+  shown only for protected docs. App.tsx renders the dialog, ⌘⇧Z awaits redo.
+
+VERIFIED: cargo test (core) 9/9 + 1/1; cargo check (src-tauri) clean; npm run
+build (tsc+vite) green; `npm run tauri dev` compiled in 12s and the app is
+RUNNING (target/debug/stitchup, vite :1420) for the visual pass.
+ENV (unchanged): cargo needs the CLT toolchain, not the Xcode shim:
+  PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH
+  SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+  CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER=/Library/Developer/CommandLineTools/usr/bin/clang
+
+ACCEPTANCE DELTA vs the 2026-09-22 record:
+- A-c6 passwords: IMPLEMENTED end-to-end (core + command + UI). Live pass pending.
+- A-c8 undo/redo: NOW EXACT for every op kind incl. redo (was partial). Live pass pending.
+- A-c15 merge: IMPLEMENTED (extract was already there). Live pass pending.
+- A-c1/9/11/12/14: still awaiting the live visual pass.
+- A-c10 selection/copy: STILL NOT IMPLEMENTED (viewer has no text selection).
+- Non-functional budgets + platform parity sheets: still not recorded.
+
+NEXT: headless src-tauri/tests/command_layer.rs over the *_inner twins ->
+release build -> dist/Stitchup-MacOS-v0.2.0.zip + GitHub release v0.2.0
+(source + prebuilt, no CI). Also: untracked windows_version/ appeared in the
+project root on 2026-09-30 13:51 from outside this session — decide its fate.

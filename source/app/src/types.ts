@@ -82,6 +82,7 @@ export interface Operation {
     | "extract"
     | "edit_text"
     | "set_metadata"
+    | "merge"
     | "open";
   /** Page numbers BEFORE the op (1-based) — revert reference. */
   before: number[];
@@ -159,6 +160,7 @@ export interface PageTreeAdapter {
   insertBlank(doc: Document, afterPage: number, widthPt: number, heightPt: number): Promise<Operation>;
   extract(doc: Document, pageNumbers: number[]): Promise<{ pages: PageState[]; outSourceHash: string }>;
   editText(doc: Document, params: TextEditParams): Promise<Operation>;
+  merge(doc: Document, path: string): Promise<Operation>;
   getPage(doc: Document, pageNumber: number): PageState | undefined;
 }
 

@@ -9,31 +9,43 @@ import {
   MetadataAdapter,
   CommitAdapter,
   OpenDocumentAdapter,
+  OpenResult,
   PageState,
 } from "../types";
-import { cmdCommit, cmdOpen, cmdPageOps, cmdSetMetadata, cmdSourceHash } from "../ipc";
+import {
+  cmdCommit,
+  cmdMerge,
+  cmdOpen,
+  cmdPageOps,
+  cmdSetMetadata,
+  cmdSourceHash,
+} from "../ipc";
 
 function beforePages(doc: Document): number[] {
   return doc.pages.map((p) => p.page_no);
 }
 
+/** Project an engine `OpenResult` into the frontend document model. */
+export function documentFromOpen(open: OpenResult, base?: Document): Document {
+  return {
+    sourceHash: open.source_hash,
+    sourceSize: open.source_size,
+    path: open.path,
+    metadata: open.metadata,
+    pages: open.pages.map((p) => ({ ...p })),
+    encrypted: open.encrypted,
+    passwordRequired: open.password_required,
+    warnings: open.warnings,
+    bytesB64: open.bytes_b64,
+    bookmarks: base?.path === open.path ? base.bookmarks : [],
+    history: base?.path === open.path ? base.history : [],
+    redo: base?.path === open.path ? base.redo : [],
+  };
+}
+
 export const openDocumentAdapter: OpenDocumentAdapter = {
   async open(path) {
-    const open = await cmdOpen(path);
-    return {
-      sourceHash: open.source_hash,
-      sourceSize: open.source_size,
-      path: open.path,
-      metadata: open.metadata,
-      pages: open.pages.map((p) => ({ ...p })),
-      encrypted: open.encrypted,
-      passwordRequired: open.password_required,
-      warnings: open.warnings,
-      bytesB64: open.bytes_b64,
-      bookmarks: [],
-      history: [],
-      redo: [],
-    };
+    return documentFromOpen(await cmdOpen(path));
   },
   async verifyIntegrity(doc) {
     const { source_hash } = await cmdSourceHash();
@@ -87,6 +99,11 @@ export const pageTreeAdapter: PageTreeAdapter = {
       new_text: params.new_text,
     });
     return { kind: "edit_text", before, data: params };
+  },
+  async merge(doc, path) {
+    const before = beforePages(doc);
+    await cmdMerge(path);
+    return { kind: "merge", before, data: { path } };
   },
   getPage(doc, pageNumber) {
     return doc.pages.find((p) => p.page_no === pageNumber);

@@ -15,9 +15,45 @@ use crate::model::{build_open_info, Metadata, OpenInfo, PageMeta};
 // Open
 // ---------------------------------------------------------------------------
 
+/// True when the raw file declares encryption in its main trailer (`/Encrypt`).
+/// Detected WITHOUT parsing objects — lopdf drops the object map for an
+/// encrypted load with no password, so we must classify before `load_mem`.
+fn declares_encryption(bytes: &[u8]) -> bool {
+    let needle = b"/Encrypt";
+    let tail_start = bytes
+        .windows(8)
+        .rposition(|w| w == b"trailer\n")
+        .map(|i| i + 8)
+        .unwrap_or(0);
+    for w in bytes[tail_start..].windows(needle.len()) {
+        if w == needle {
+            return true;
+        }
+    }
+    false
+}
+
+fn password_required_info(bytes: &[u8], path: PathBuf) -> OpenInfo {
+    let warnings = vec!["document is password-protected; provide the password to load its pages".into()];
+    OpenInfo {
+        path,
+        source_hash: sha256_hex(bytes),
+        source_size: bytes.len() as u64,
+        page_count: 0,
+        pages: Vec::new(),
+        metadata: Metadata::default(),
+        encrypted: true,
+        password_required: true,
+        warnings,
+    }
+}
+
 pub fn open_bytes(bytes: Vec<u8>, path: PathBuf) -> Result<OpenInfo, EngineError> {
     let source_hash = sha256_hex(&bytes);
     let source_size = bytes.len() as u64;
+    if declares_encryption(&bytes) {
+        return Ok(password_required_info(&bytes, path));
+    }
     let mut warnings = Vec::new();
     let doc =
         PdfDoc::load_mem(&bytes).map_err(|e| classify_open_error(&e.to_string(), bytes.len()))?;
@@ -232,6 +268,92 @@ pub fn extract(doc: &PdfDoc, page_nos: &[u32]) -> Result<PdfDoc, EngineError> {
     dict.set("Kids", Object::Array(kids.iter().map(|&r| Object::Reference(r)).collect()));
     dict.set("Count", Object::Integer(kids.len() as i64));
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Unlock (encrypted documents)
+// ---------------------------------------------------------------------------
+
+/// Decrypt an encrypted document with a user/owner password.
+/// `password_required` semantics live with the caller; this returns an
+/// `Encrypted` error for a wrong password or an unsupported handler.
+pub fn unlock_document(doc: &mut PdfDoc, password: &str) -> Result<(), EngineError> {
+    if !doc.is_encrypted() {
+        return Ok(());
+    }
+    doc.decrypt(password).map_err(|e| {
+        crate::err!(
+            ErrorCode::Encrypted,
+            "wrong password or unsupported encryption handler: {e}"
+        )
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Merge (append another PDF's pages)
+// ---------------------------------------------------------------------------
+
+fn remap(obj: &Object, map: &std::collections::HashMap<(u32, u16), (u32, u16)>) -> Object {
+    match obj {
+        Object::Reference((id, gen)) => map
+            .get(&(*id, *gen))
+            .copied()
+            .map(Object::Reference)
+            .unwrap_or_else(|| Object::Reference((*id, *gen))),
+        Object::Array(arr) => Object::Array(arr.iter().map(|o| remap(o, map)).collect()),
+        Object::Dictionary(d) => Object::Dictionary(
+            d.iter()
+                .map(|(k, v)| (k.clone(), remap(v, map)))
+                .collect(),
+        ),
+        Object::Stream(s) => Object::Stream(Stream::new(
+            s.dict.iter().map(|(k, v)| (k.clone(), remap(v, map))).collect(),
+            s.content.clone(),
+        )),
+        other => other.clone(),
+    }
+}
+
+/// Append every page of `other` (in order) to the end of `doc`. The other
+/// document's full object graph is copied under fresh ids so shared fonts,
+/// images, and resources keep resolving; the page `/Parent` pointers are
+/// repointed at `doc`'s root Pages node.
+pub fn merge_doc(doc: &mut PdfDoc, other: &PdfDoc) -> Result<Vec<PageMeta>, EngineError> {
+    if other.get_pages().is_empty() {
+        return Err(crate::err!(
+            ErrorCode::ValidationFailed,
+            "merge source has no pages"
+        ));
+    }
+    let (pages_id, mut kids) = pages_struct(doc)?;
+
+    let mut map: std::collections::HashMap<(u32, u16), (u32, u16)> = std::collections::HashMap::new();
+    let old_ids: Vec<(u32, u16)> = other.objects.keys().copied().collect();
+    for old in old_ids.iter() {
+        let new = doc.add_object(Object::Null);
+        map.insert(*old, new);
+    }
+    for old in old_ids.iter() {
+        if let Some(obj) = other.objects.get(old) {
+            let mapped = remap(obj, &map);
+            let new = *map.get(old).unwrap_or(old);
+            doc.objects.insert(new, mapped);
+        }
+    }
+
+    for (_page_no, id) in other.get_pages() {
+        let new_id = *map.get(&(id.0, id.1)).unwrap_or(&(id.0, id.1));
+        if let Some(d) = doc
+            .objects
+            .get_mut(&(new_id.0, 0))
+            .and_then(|o| o.as_dict_mut().ok())
+        {
+            d.set("Parent", Object::Reference((pages_id, 0)));
+        }
+        kids.push(new_id);
+    }
+    set_kids(doc, pages_id, &kids, kids.len() as u32)?;
+    crate::model::collect_pages(doc)
 }
 
 // ---------------------------------------------------------------------------

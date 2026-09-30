@@ -328,18 +328,19 @@ fn annotations_document() -> PdfDoc {
 }
 
 fn malformed_bytes() -> Vec<u8> {
-    let clean = save_bytes(text_document(1));
-    // Corrupt the trailing startxref pointer AND strip the %%EOF marker preamble:
-    // a classic malformed tail. Parser must fail gracefully (error, no crash).
-    let mut corrupted = clean.clone();
-    if let Some(idx) = corrupted.windows(8).position(|w| w == b"startxref") {
-        for b in corrupted[idx..].iter_mut() {
-            *b = b' ';
-        }
-    }
-    // append garbage to force xref mismatch
-    corrupted.extend_from_slice(b"\ngarbage_not_a_pdf_tail");
-    corrupted
+    // A syntactically valid file whose Catalog points at a Pages node that does
+    // not exist: the parser accepts the bytes, but page collection must fail
+    // with a structured `malformed` error (no crash, no hang).
+    let (mut doc, _pages) = new_doc();
+    let cat_id = doc.add_object(Object::Dictionary(dictionary! {
+        "Type" => Object::Name("Catalog".into()),
+        "Pages" => Object::Reference((0xFFFFF0, 0)),
+    }));
+    doc.trailer.set("Root", Object::Reference(cat_id));
+    let mut out = save_bytes(doc);
+    // Append a garbage tail so the xref/startxref region is also non-conforming.
+    out.extend_from_slice(b"\nnot_a_valid_tail_terminator 0 0 R\n");
+    out
 }
 
 fn attachments_document() -> PdfDoc {
