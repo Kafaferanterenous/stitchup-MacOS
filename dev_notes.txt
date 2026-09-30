@@ -564,3 +564,17 @@ NEXT: headless src-tauri/tests/command_layer.rs over the *_inner twins ->
 release build -> dist/Stitchup-MacOS-v0.2.0.zip + GitHub release v0.2.0
 (source + prebuilt, no CI). Also: untracked windows_version/ appeared in the
 project root on 2026-09-30 13:51 from outside this session — decide its fate.
+
+2026-09-30 (later) — PUBLISHED v0.2.0
+- Source pushed: ec83430 "Stage 1.5: exact op-log undo/redo, password unlock,
+  document merge" -> Kafaferanterenous/stitchup-MacOS main.
+- Release build: `npm run tauri build` (release) OK; Stitchup.app ad-hoc signed
+  (codesign --force --deep --sign -), codesign -v --deep --strict passes, smoke
+  launched and stayed alive. x86_64 only (as v0.1.0).
+- Prebuilt: dist/Stitchup-MacOS-v0.2.0.zip (4.3 MB) -> GitHub release v0.2.0
+  "Stitchup v0.2.0 (macOS Intel .app + source)" with the full delta in the notes.
+  No CI added; source is on main, the artifact is on the release.
+- NOTE for later: Xcode 16.2 is now installed at /Applications/Xcode.app
+  (xcode-select still points at CLT). A universal x86_64+arm64 slice is now
+  possible (rustup target add aarch64-apple-darwin + --target
+  universal-apple-darwin), which would also unblock the Atmosfera arm64 item.
