@@ -27,11 +27,15 @@ export interface AppState {
   viewMode: "single" | "spread" | "continuous";
   busy: boolean;
   lastError: Error | null;
+  /** Transient, non-blocking notice (e.g. "Copied 12 characters"). */
+  notice: string | null;
   lastCommit: { target: string; sha: string; size: number } | null;
   statusMessage: string;
   metadataOpen: boolean;
   /** Text-edit mode: viewer overlays clickable text runs. */
   editMode: boolean;
+  /** Current text-layer selection (logical characters), for Copy (A-c10). */
+  selectionText: string;
   /** Left pane (thumbnails / bookmarks). */
   paneOpen: boolean;
   paneTab: "pages" | "bookmarks";
@@ -47,10 +51,12 @@ let state: AppState = {
   viewMode: "continuous",
   busy: false,
   lastError: null,
+  notice: null,
   lastCommit: null,
   statusMessage: "No document open",
   metadataOpen: false,
   editMode: false,
+  selectionText: "",
   paneOpen: true,
   paneTab: "pages",
   unlockOpen: false,
@@ -58,9 +64,18 @@ let state: AppState = {
 
 const listeners = new Set<() => void>();
 
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
 function set(partial: Partial<AppState>) {
   state = { ...state, ...partial };
   listeners.forEach((l) => l());
+}
+
+/** Show a transient notice that clears itself after a moment. */
+function notify(message: string) {
+  set({ notice: message });
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => set({ notice: null }), 2500);
 }
 
 export function getState(): AppState {
@@ -97,6 +112,26 @@ function clampPage(doc: Document, wanted: number): number {
   return Math.min(Math.max(1, wanted), Math.max(1, doc.pages.length));
 }
 
+/** execCommand('copy') fallback for webviews without the async Clipboard API. */
+function legacyCopy(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+  return ok;
+}
+
 export const store = {
   async open(path: string) {
     set({ busy: true, lastError: null });
@@ -106,6 +141,7 @@ export const store = {
         doc,
         currentPage: 1,
         editMode: false,
+        selectionText: "",
         unlockOpen: doc.passwordRequired,
         statusMessage: doc.passwordRequired
           ? "This document is password-protected"
@@ -127,6 +163,7 @@ export const store = {
         doc,
         currentPage: 1,
         unlockOpen: false,
+        selectionText: "",
         statusMessage: `Unlocked ${doc.pages.length} pages`,
       });
       return true;
@@ -388,6 +425,36 @@ export const store = {
 
   setEditMode(on: boolean) {
     set({ editMode: on });
+  },
+
+  /** Track the current text-layer selection (called from selectionchange). */
+  setSelection(text: string) {
+    if (text === state.selectionText) return;
+    set({ selectionText: text });
+  },
+
+  /**
+   * Copy the current selection to the OS clipboard, Unicode-preserving (A-c10).
+   * Uses the async Clipboard API, falling back to a hidden textarea + execCommand
+   * for webviews that gate `navigator.clipboard`.
+   */
+  async copySelection(): Promise<boolean> {
+    const text = state.selectionText || document.getSelection()?.toString() || "";
+    if (!text) return false;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      ok = legacyCopy(text);
+    }
+    set({
+      statusMessage: ok
+        ? `Copied ${text.length} character${text.length === 1 ? "" : "s"}`
+        : "Copy failed",
+    });
+    notify(ok ? `Copied ${text.length} character${text.length === 1 ? "" : "s"}` : "Copy failed");
+    return ok;
   },
 
   clearError() {

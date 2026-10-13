@@ -319,6 +319,50 @@ let mut doc = PdfDoc::load_mem(&read_fixture("F-01_text.pdf")).unwrap();
     assert_eq!(pm[3].width_pt, 612.0, "merged blank page keeps its size");
 }
 
+/// Regression for `oplog::apply`: undoing the FIRST metadata edit on a
+/// document with no `/Info` must REMOVE the Info object `set_metadata` created
+/// (full-replacement semantics), not leave it behind. Guards the
+/// "target state has no /Info" branch.
+#[test]
+fn a_c8_metadata_undo_removes_created_info() {
+    let mut doc = PdfDoc::load_mem(&read_fixture("F-01_text.pdf")).unwrap();
+    // Precondition: this fixture has no /Info to begin with.
+    assert!(doc.trailer.get(b"Info").is_err(), "fixture unexpectedly has /Info");
+
+    let mut log = OpLog::default();
+    let before = oplog::snapshot(&doc).unwrap();
+    assert!(before.info.is_none(), "snapshot should record no Info");
+    set_metadata(
+        &mut doc,
+        &Metadata { title: Some("stitchup".into()), ..Default::default() },
+    )
+    .unwrap();
+    let after = oplog::snapshot(&doc).unwrap();
+    assert!(after.info.is_some(), "set_metadata created an Info object");
+    log.push(oplog::OpRecord { label: "metadata".into(), before, after });
+
+    assert_eq!(
+        stitchup_core::model::read_metadata(&doc).title.as_deref(),
+        Some("stitchup")
+    );
+
+    // Undo fully reverts — including removing the created /Info.
+    let rec = log.pop_undo().unwrap();
+    oplog::apply(&mut doc, &rec, true).unwrap();
+    log.redo.push(rec);
+    assert!(doc.trailer.get(b"Info").is_err(), "undo left the created /Info behind");
+    assert_eq!(stitchup_core::model::read_metadata(&doc).title, None);
+
+    // Redo recreates it exactly.
+    let rec = log.pop_redo().unwrap();
+    oplog::apply(&mut doc, &rec, false).unwrap();
+    log.undo.push(rec);
+    assert_eq!(
+        stitchup_core::model::read_metadata(&doc).title.as_deref(),
+        Some("stitchup")
+    );
+}
+
 #[test]
 fn dbg_f04_scratch() {
     let doc = PdfDoc::load_mem(&read_fixture("F-04_encrypted.pdf")).unwrap();

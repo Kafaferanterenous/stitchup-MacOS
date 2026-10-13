@@ -60,6 +60,65 @@ function EditOverlay({
   );
 }
 
+/**
+ * A transparent text layer over the rendered page so the user can select and
+ * copy logical text (A-c10). Runs come from the text layer via the adapter;
+ * selection is handled natively by the webview, so the OS clipboard receives
+ * the Unicode characters, not glyph ids. Only shown on un-rotated pages: the
+ * text-run geometry is extracted axis-aligned (a documented Stage 1 limit).
+ */
+function TextSelectLayer({
+  session,
+  pageNo,
+  zoom,
+  rotation,
+  enabled,
+}: {
+  session: RenderSession;
+  pageNo: number;
+  zoom: number;
+  rotation: number;
+  enabled: boolean;
+}) {
+  const [runs, setRuns] = useState<TextRun[]>([]);
+  const upright = rotation % 360 === 0;
+
+  useEffect(() => {
+    if (!upright || !enabled) return;
+    let alive = true;
+    getTextRuns(session, pageNo)
+      .then((r) => {
+        if (alive) setRuns(r);
+      })
+      .catch(() => {
+        if (alive) setRuns([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [session, pageNo, upright, enabled]);
+
+  if (!upright) return null;
+
+  return (
+    <div className="text-layer">
+      {runs.map((run, i) => (
+        <span
+          key={i}
+          className="text-run"
+          style={{
+            left: run.rect.x * zoom,
+            top: run.rect.y * zoom,
+            width: run.rect.width * zoom,
+            fontSize: run.rect.height * zoom,
+          }}>
+          {run.str}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function EditTextModal({
   pageNo,
   run,
@@ -135,11 +194,35 @@ function PageView({
 }) {
   const app = useAppState();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [rendered, setRendered] = useState<RenderedPage | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
 
   const docMeta = session.doc.pages.find((p) => p.page_no === pageNo);
   const rotation = docMeta?.rotation ?? 0;
+
+  // Load the selectable text layer only once the page is near the viewport, so
+  // a 1000-page document (F-11) doesn't fetch every page's text up front.
+  useEffect(() => {
+    if (visible) return;
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   useEffect(() => {
     let alive = true;
@@ -161,12 +244,22 @@ function PageView({
 
   return (
     <div
+      ref={rootRef}
       className={`page-view${err ? " has-error" : ""}`}
       style={{ width: rendered?.sizePx.width, height: rendered?.sizePx.height }}
     >
       <canvas ref={canvasRef} width={rendered?.sizePx.width} height={rendered?.sizePx.height} />
       {err && <div className="page-error">{err}</div>}
       {editMode && !err && <EditOverlay session={session} pageNo={pageNo} zoom={app.zoom} onPick={onPick} />}
+      {!editMode && !err && (
+        <TextSelectLayer
+          session={session}
+          pageNo={pageNo}
+          zoom={app.zoom}
+          rotation={rotation}
+          enabled={visible}
+        />
+      )}
     </div>
   );
 }
@@ -176,6 +269,16 @@ export function Viewer() {
   const [session, setSession] = useState<RenderSession | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<EditPick | null>(null);
+
+  // Mirror the document selection into the store so Copy can enable/disable and
+  // report a count (A-c10).
+  useEffect(() => {
+    const onSelectionChange = () => {
+      store.setSelection(document.getSelection()?.toString() ?? "");
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, []);
 
   useEffect(() => {
     if (!app.doc) {

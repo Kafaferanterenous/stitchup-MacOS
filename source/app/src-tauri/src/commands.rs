@@ -186,13 +186,13 @@ fn logged<F>(g: &mut SessionState, label: &str, f: F) -> Result<Vec<PageMeta>, E
 where
     F: FnOnce(&mut PdfDoc) -> Result<(), EngineError>,
 {
-    let doc = g.doc.as_mut().ok_or_else(no_doc)?;
     if g.password_required {
         return Err(EngineError::new(
             ErrorCode::PasswordRequired,
             "document is still password-protected",
         ));
     }
+    let doc = g.doc.as_mut().ok_or_else(no_doc)?;
     let before = oplog::snapshot(doc)?;
     f(doc)?;
     let after = oplog::snapshot(doc)?;

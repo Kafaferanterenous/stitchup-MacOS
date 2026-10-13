@@ -113,20 +113,30 @@ pub fn apply(doc: &mut PdfDoc, rec: &OpRecord, use_before: bool) -> Result<(), E
 
     let info_ref = doc.trailer.get(b"Info").ok().and_then(|o| o.as_reference().ok());
     let info_target = snap.info.clone();
-    match (info_ref, info_target) {
-        // Restore into the existing Info object when we have one.
-        (Some(r), Some(obj)) => {
-            doc.objects.insert(r, obj);
+    match info_target {
+        // Restore the Info dictionary into the object the trailer already points at.
+        Some(obj) => match info_ref {
+            Some(r) => {
+                doc.objects.insert(r, obj);
+            }
+            // No usable reference (absent or inline): (re)create one.
+            None => {
+                let id = doc.add_object(obj);
+                doc.trailer.set("Info", Object::Reference(id));
+            }
+        },
+        // The target state has no /Info at all. A metadata edit creates one, so
+        // undo must remove it (and drop the object the trailer pointed at) to
+        // revert exactly; without this the created Info is left behind.
+        None => {
+            if doc.trailer.get(b"Info").is_ok() {
+                if let Some(r) = info_ref {
+                    doc.objects.remove(&r);
+                }
+                doc.trailer.remove(b"Info");
+            }
         }
-        // Otherwise (re)create it and point the trailer at it.
-        (None, Some(obj)) => {
-            let id = doc.add_object(obj);
-            doc.trailer.set("Info", Object::Reference(id));
-        }
-        _ => {}
     }
 
-    // The `/Info` object may now be duplicated from a previous apply; dedupe is
-    // unnecessary — identical clones are harmless.
     Ok(())
 }

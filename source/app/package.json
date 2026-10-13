@@ -15,7 +15,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
-    "@tauri-apps/plugin-fs": "^2.0.0",
     "konva": "^9.2.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",

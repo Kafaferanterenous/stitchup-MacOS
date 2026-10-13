@@ -1,6 +1,9 @@
 # macOS
 .DS_Store
 
+# Third-party reference code (read-only study; never part of the Stitchup build)
+reference/
+
 # Node / frontend
 node_modules/
 dist/

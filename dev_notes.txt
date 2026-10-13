@@ -578,3 +578,94 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   (xcode-select still points at CLT). A universal x86_64+arm64 slice is now
   possible (rustup target add aarch64-apple-darwin + --target
   universal-apple-darwin), which would also unblock the Atmosfera arm64 item.
+
+2026-10-13 — RIBBON TOOLBAR (requested change) + reference repos
+- Reference code cloned (study only) into reference/ from github.com/storytold:
+  vectorcraft (live-edit), pdfcraft, designcraft, wordcraft (ribbon layout).
+  reference/ is .gitignore'd so no third-party code can enter the Stitchup
+  build (project legal rule: permissive deps, no copied code/assets).
+- New ribbon replaces the flat Toolbar in App.tsx:
+  source/app/src/features/ribbon/Ribbon.tsx + icons.tsx (original code-drawn
+  SVG icons, clean-room), styles appended to src/styles/global.css.
+  Structure: tab strip (File · Home · Pages · Insert · View) -> labelled groups
+  -> large/small controls, plus a right-aligned quick-access strip and a File
+  backstage (Open / Save As / Document Properties + theme + doc info).
+  Groups: Home=File·History·Page·Edit; Pages=Organise·Navigate·Bookmarks;
+  Insert=Pages·Text·Properties; View=Views·Zoom·Show·Theme. Every control
+  dispatches an existing store action; theme uses applyTheme/THEMES.
+- VERIFIED: npx tsc --noEmit clean; npm run build (tsc+vite) green. Live visual
+  pass still pending (no display/headless browser on this host). Old
+  features/toolbar/Toolbar.tsx left in place (now unused) — remove or keep.
+- Not committed/pushed (awaiting the user's go-ahead).
+
+2026-10-13 (later) — A-c10 TEXT SELECTION + COPY
+- Closes the last unbuilt Stage 1 feature (STAGE0_FIXTURES_AND_ACCEPTANCE A-c10
+  / §3 "text selection + copy from the text layer").
+- Viewer: new TextSelectLayer overlays transparent, selectable spans built from
+  the adapter's getTextRuns (renderAdapter already had it for search). Selection
+  is native (webview), so the OS clipboard gets the logical Unicode characters
+  from F-07, not glyph ids. Shown only in view mode (edit mode keeps its own
+  overlay) and only on un-rotated pages — text-run geometry is extracted
+  axis-aligned, a documented Stage 1 limit. Loading is gated by an
+  IntersectionObserver (rootMargin 300px) so continuous view of a 1000-page
+  doc (F-11) doesn't fetch every page's text up front.
+- store: selectionText mirror (document selectionchange -> store.setSelection),
+  async copySelection() (Clipboard API, execCommand textarea fallback),
+  and a transient `notice` (auto-clearing toast) for copy feedback.
+- Ribbon Home gains a Clipboard group (Copy), disabled until text is selected.
+- VERIFIED: npx tsc --noEmit clean; npm run build (tsc+vite) green. Live pass
+  (select a phrase on F-07, paste elsewhere) still pending on a real display.
+  No frontend unit-test runner exists (Rust core + fixture scripts only), so
+  this lands compile-verified; A-c10 remains a manual acceptance item.
+- Not committed/pushed.
+
+2026-10-13 (later still) — HEADLESS COMMAND-LAYER TESTS + 2 BUG FIXES
+- Added source/app/src-tauri/tests/command_layer.rs: 9 tests driving the
+  session-logic twins (`*_inner`) with a bare `Mutex<SessionState>` — no
+  tauri::App, window, or display. Covers: open payload shape + verbatim bytes +
+  source_hash agreement; reopen returns in-memory state (not disk); reorder
+  (observed via /Kids order through render_bytes) + unknown-kind rejection;
+  mixed insert/delete/rotate with exact undo/redo; metadata set+undo; merge +
+  self-merge refusal + missing-source io_error; commit_export data-safety (no
+  save-over-source, no clobber without overwrite, atomic happy path, source
+  untouched, no temp litter); the full encrypted gate (ops/render refused while
+  locked → password_required, wrong password → encrypted, unlock → usable); and
+  the no-session gates. Two REAL defects surfaced and were fixed:
+    1. `commands::logged` checked `doc` before `password_required`, so a locked
+       document returned `open_failed` ("no document open") instead of
+       `password_required`. Reordered to match render_bytes/commit_export.
+    2. `oplog::apply` had no case for "target snapshot has no /Info"; since
+       `set_metadata` CREATES /Info on a doc that lacks one, undoing the FIRST
+       metadata edit was a silent no-op (the created /Info survived, title stuck).
+       apply now removes the trailer /Info + its object when the target has none.
+- Added core regression test a_c8_metadata_undo_removes_created_info (stage1.rs).
+- VERIFIED (CLT toolchain env): core stage1 10/10 + dbg_esave 1/1; src-tauri
+  command_layer 9/9. README status notes the new suite. Still purely STATIC —
+  per docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md static checks are not live
+  acceptance, so the macOS parity sheet sign-off remains open.
+- Not committed/pushed.
+
+2026-10-13 (continuing) — LEAST-PRIVILEGE HARDENING + CLEANUP
+- Removed the UNUSED fs plugin end-to-end (audited: no frontend import of
+  @tauri-apps/plugin-fs anywhere; Rust command layer uses std::fs; webview only
+  PICKS paths via the dialog plugin). So `fs:default` granted access to commands
+  that were never registered — dead surface.
+    capabilities/default.json: dropped "fs:default" (+ redundant "core:path:default";
+      nothing uses the path API and core:default already covers it).
+    src-tauri/src/lib.rs: dropped .plugin(tauri_plugin_fs::init()).
+    src-tauri/Cargo.toml: dropped the direct tauri-plugin-fs dep (it remains a
+      TRANSITIVE crate of tauri-plugin-dialog, so it stays in Cargo.lock — but is
+      no longer registered => no fs commands exposed).
+    package.json: dropped @tauri-apps/plugin-fs; npm install pruned it (98 pkgs).
+- Deleted the now-unused source/app/src/features/toolbar/Toolbar.tsx (App renders
+  the Ribbon); fixed the stale App.tsx comment that referenced it.
+- Ledger: docs/STAGE0_DEPENDENCY_LEDGER.md gets a DEPENDENCY_REMOVED block + a
+  2026-10-13 status-stamp bullet.
+- VERIFIED: cargo test (src-tauri) 9/9 — `generate_context!` re-validates the ACL
+  with the new capability set, so the tightened capabilities are compile-checked;
+  npx tsc --noEmit clean; npm run build green.
+- Note: `bundle.active` is ALREADY true in tauri.conf.json and the icon list is
+  populated, so that earlier "open work" item is stale (real custom artwork still
+  TBD). CSP is still null — left alone (tightening it needs a live pass to avoid
+  breaking the pdf.js worker).
+- Not committed/pushed.

@@ -7,7 +7,9 @@ a copy of any commercial product.
 
 Status: **Stage 0 (design contract) complete; Stage 1 built and running on
 macOS.** The Rust structural core (`source/core`) compiles, `cargo test` is
-green, and the fixture set (F-01..F-14, F-09 deferred) is generated + verified.
+green (core stage-1 acceptance + a headless Tauri session-layer suite in
+`source/app/src-tauri/tests/command_layer.rs`), and the fixture set
+(F-01..F-14, F-09 deferred) is generated + verified.
 The Tauri 2 + React app (`source/app`) builds and runs on this machine
 (`npm run tauri dev`), with viewer/search/zoom, page-tree structural ops
 (reorder/rotate/delete/insert/extract), metadata, atomic export, undo, themes,

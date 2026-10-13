@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useAppState, store, SHORTCUTS, matchesShortcut } from "./store";
 import type { ViewMode } from "./types";
-import { Toolbar } from "./features/toolbar/Toolbar";
+import { Ribbon } from "./features/ribbon/Ribbon";
 import { Viewer } from "./features/viewer/Viewer";
 import { PageTree } from "./features/pageops/PageTree";
 import { SearchBar } from "./features/search/SearchBar";
@@ -59,7 +59,7 @@ export default function App() {
 
   return (
     <div className="app-shell" data-view={app.viewMode}>
-      <Toolbar />
+      <Ribbon />
       <SearchBar />
       <main className="app-body" data-pane={app.paneOpen ? "open" : "hidden"}>
         <section className="viewer-pane" aria-label="document viewer">
@@ -91,12 +91,17 @@ export default function App() {
       <PasswordDialog />
       <CommitPanel />
       <MessageBox />
+      {app.notice && (
+        <div className="notice-toast" role="status">
+          {app.notice}
+        </div>
+      )}
     </div>
   );
 
   async function awaitPick(): Promise<string> {
-    // Deferred: real file dialog lives in CommitPanel/Toolbar via the dialog
-    // plugin when running under Tauri. In dev (browser) we accept a typed path.
+    // Deferred: the real file dialog lives in the Ribbon/CommitPanel via the
+    // dialog plugin when running under Tauri. In dev (browser) we type a path.
     return (
       window.prompt("Path to a PDF (Tauri file dialog lands here at runtime)", "") ?? ""
     );

@@ -343,6 +343,26 @@ decision=approved (typechecking)
 created=2026-09-14
 ```
 
+```
+DEPENDENCY_REMOVED @tauri-apps/plugin-fs 2.5.2 + tauri-plugin-fs (direct)   (D-09)
+reason=unused. Neither the frontend nor the Rust command layer touches files
+       through the fs plugin: all file I/O goes through the IPC command layer
+       (std::fs in commands.rs), and the webview only PICKS paths via the
+       dialog plugin. Keeping `fs:default` granted access to a plugin whose
+       commands were never registered — dead surface. Least-privilege removal.
+scope=source/app/package.json                 (-@tauri-apps/plugin-fs)
+      source/app/src-tauri/Cargo.toml          (-tauri-plugin-fs direct dep)
+      source/app/src-tauri/src/lib.rs          (-.plugin(tauri_plugin_fs::init()))
+      source/app/src-tauri/capabilities/default.json
+                                               (-"fs:default", -"core:path:default")
+note=tauri-plugin-fs stays in Cargo.lock as a TRANSITIVE crate of
+      tauri-plugin-dialog, but is no longer registered, so no fs commands are
+      exposed to the webview.
+license=MIT OR Apache-2.0 (unchanged)
+decision=approved (least privilege)
+created=2026-10-13
+```
+
 Notes:
 - Dev-only rendering/self-test inputs that are NOT shipped: the bundled
   pdfjs worker asset is already emitted by vite (dist/assets/pdf.worker-*.mjs).
@@ -361,4 +381,7 @@ Notes:
   (Node 26.8.2 / npm 11.19.1). §4c lists direct npm deps + their shas; full
   resolvable tree committed in package-lock.json. `npm run build` (tsc + vite)
   passes; `npm run tauri dev` builds the Rust host and launches the app.
+- **Update 2026-10-13:** removed the unused fs plugin (direct dep, host
+  registration, and the `fs:default` capability) — no fs commands are registered,
+  so the grant was dead. The dialog plugin is kept (open/save path pickers).
 - Re-verify each license/NOTICE at the actual pinned version before release.

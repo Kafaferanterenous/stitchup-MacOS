@@ -409,6 +409,22 @@ select {
   max-width: 60vw;
 }
 
+/* transient success/fyi notice (e.g. copy feedback) */
+.notice-toast {
+  position: fixed;
+  bottom: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: var(--bg-modal);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px var(--shadow);
+  z-index: 60;
+  max-width: 60vw;
+}
+
 /* text-edit mode */
 button.active {
   outline: 2px solid var(--accent);
@@ -429,6 +445,28 @@ button.active {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* selectable text layer (view mode, A-c10): transparent, geometry-only */
+.text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.text-layer .text-run {
+  position: absolute;
+  white-space: pre;
+  color: transparent;
+  transform-origin: 0 0;
+  pointer-events: auto;
+  cursor: text;
+}
+
+.text-layer .text-run::selection {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .edit-overlay-on .text-run-edit {
@@ -463,4 +501,254 @@ button.active {
 .edit-note {
   margin: 8px 0 0;
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ribbon (tab strip -> labelled groups -> big/small controls)         */
+/* ------------------------------------------------------------------ */
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.ribbon-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 3px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ribbon-tab {
+  padding: 5px 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 5px 5px 0 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.ribbon-tab:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ribbon-tab.active {
+  color: var(--fg);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.ribbon-qat {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-bottom: 3px;
+}
+
+.qat-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 5px;
+}
+
+.ribbon-body {
+  display: flex;
+  align-items: stretch;
+  padding: 3px 6px 0;
+  overflow-x: auto;
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.ribbon-group + .ribbon-group {
+  border-left: 1px solid var(--border);
+}
+
+.ribbon-group-items {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px 0 4px;
+}
+
+.ribbon-group-label {
+  text-align: center;
+  padding: 1px 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+}
+
+.ribbon-readout {
+  align-self: center;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* big and small controls */
+.rb-big,
+.rb-small {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.rb-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 58px;
+  max-width: 84px;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+
+.rb-big .rb-icon {
+  display: grid;
+  place-items: center;
+  height: 26px;
+}
+
+.rb-big .rb-text {
+  line-height: 1.15;
+  text-align: center;
+}
+
+.rb-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.rb-big:hover:not(:disabled),
+.rb-small:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--border);
+}
+
+.rb-big:active:not(:disabled),
+.rb-small:active:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.rb-big.active,
+.rb-small.active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rb-big:disabled,
+.rb-small:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* a 2-column block of small controls inside one group */
+.rb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(104px, 1fr));
+  align-content: start;
+  justify-items: start;
+  gap: 1px 4px;
+}
+
+.rb-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.rb-page {
+  width: 52px;
+  text-align: center;
+  padding: 3px 4px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+}
+
+.rb-muted {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+/* File backstage */
+.ribbon-backstage {
+  display: flex;
+  min-height: 210px;
+}
+
+.backstage-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 236px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--border);
+}
+
+.backstage-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.backstage-item:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.backstage-side {
+  flex: 1;
+  padding: 14px 22px;
+}
+
+.backstage-side h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.backstage-side p {
+  margin: 2px 0;
+  font-size: 12px;
+}
+
+.backstage-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 16px;
+  max-width: 220px;
+  font-size: 12px;
+  color: var(--fg-muted);
 }
