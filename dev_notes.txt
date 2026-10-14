@@ -687,3 +687,37 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   fresh Stitchup.app ad-hoc signed and placed in dist/. Text render + Exit menu
   need a live visual pass (arks).
 - Not committed/pushed at time of writing.
+
+2026-10-14 (continuing) — BLANK-PAGE + LAYOUT LIVE FIX  (release v0.2.2)
+- The v0.2.1 "font fix" was NOT the real cause of blank pages. A live pass
+  (user: "no text appears at all after opening") plus a temp in-app file logger
+  (debug_log Rust command -> /tmp/stitchup-debug.log) proved:
+    * pdf.js renders fine: bind ok numPages=5; every page renders with real
+      pixels (ink p1=16125, p2=16522, p3=22092, p4=15262, p5=12).
+    * The visible <canvas> was BLANK because PageView drew the offscreen render
+      inside the render promise, then `setRendered()` made React apply
+      width/height to the <canvas> — and setting those CLEARS a canvas. Net:
+      draw, then wipe. Fixed by moving `ctx.drawImage` into a separate effect
+      that runs AFTER React commits the final canvas size, and sizing the
+      backing store from `rendered.image.width/height`.
+- SECOND bug found by the same logger: .app-body grid was `260px 1fr` but
+  App.tsx renders `viewer-pane` FIRST, so the 260px column went to the VIEWER
+  and the thumbnail sidebar got 1fr -> thumbnails 892px wide ("elongated /
+  stretched") and the main pane squeezed to ~207px ("blank"). Fixed in CSS with
+  explicit `grid-template-areas: "pages viewer"` and pinned grid-area on
+  .pages-pane/.viewer-pane (sidebar 260px left, viewer fills the rest). Verified
+  post-fix: app-body cols=260px 940px; pages-pane=260; viewer-pane=940;
+  page-view 595x842 with ink; thumb 212x300.
+- DIAGNOSTICS REMOVED after verification (debug_log command + _diag.ts + main
+  import + inline ink logging). Final build has no logger; /tmp/stitchup-debug.log
+  is not created.
+- NOTE (data-safety, not a code bug): opening a file by absolute path into
+  ~/Documents from an UNSIGNED app blocks the main thread on a macOS TCC prompt
+  (sample showed open_document_inner -> std::fs::read -> File::open_c parked).
+  The normal File▸Open dialog path is unaffected (user-granted access). Testing
+  with a hardcoded path should use /tmp.
+- Committed ed091c7, pushed to stitchup-MacOS main; release v0.2.2 with
+  dist/Stitchup-MacOS-v0.2.2.zip (ad-hoc signed). AGENTS.md map updated.
+- OPEN: full live visual acceptance pass (A-c10 selection/copy live runs), the
+  macOS parity sign-off in docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md, and the large
+  gap vs the Windows port stitchup-Win v0.12.11.
