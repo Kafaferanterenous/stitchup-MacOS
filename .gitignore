@@ -9,6 +9,9 @@ node_modules/
 dist/
 *.local
 
+# Generated pdf.js runtime assets (see source/app/scripts/copy-pdfjs-assets.mjs)
+source/app/public/
+
 # Rust / Tauri
 **/target/
 **/src-tauri/gen/

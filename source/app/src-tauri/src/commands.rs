@@ -587,3 +587,10 @@ struct EditTextPayload {
 fn validation(e: serde_json::Error) -> EngineError {
     EngineError::new(ErrorCode::ValidationFailed, format!("payload: {e}"))
 }
+
+/// Quit the application cleanly (File ▸ Exit). The session is in-memory only
+/// and the source is never modified, so there is nothing to flush first.
+#[tauri::command]
+pub fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}

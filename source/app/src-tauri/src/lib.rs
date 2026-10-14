@@ -28,6 +28,7 @@ pub fn run() {
             commands::commit_export,
             commands::source_hash,
             commands::render_bytes,
+            commands::quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Stitchup");

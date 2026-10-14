@@ -17,7 +17,7 @@ import {
   openDocumentAdapter,
   pageTreeAdapter,
 } from "./adapters/structuralAdapter";
-import { cmdOpen, cmdRedo, cmdRenderBytes, cmdUndo, cmdUnlock } from "./ipc";
+import { cmdOpen, cmdQuit, cmdRedo, cmdRenderBytes, cmdUndo, cmdUnlock } from "./ipc";
 
 export interface AppState {
   doc: Document | null;
@@ -460,6 +460,11 @@ export const store = {
   clearError() {
     set({ lastError: null });
   },
+
+  /** Quit the app (File ▸ Exit). */
+  async exitApp(): Promise<void> {
+    await cmdQuit();
+  },
 };
 
 /** Keyboard shortcut map (accessibility, A-c list). */
@@ -475,6 +480,7 @@ export const SHORTCUTS = {
   actual: "meta+2",
   toggleView: "meta+g",
   togglePane: "meta+shift+p",
+  exit: "meta+q",
 } as const;
 
 export function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {

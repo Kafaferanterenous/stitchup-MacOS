@@ -199,6 +199,14 @@ export function Ribbon() {
               disabled={!doc}>
               <Icon name="info" size={20} /> Document Properties…
             </button>
+            <div className="backstage-sep" />
+            <button
+              type="button"
+              className="backstage-item"
+              onClick={() => void store.exitApp()}
+              title="Quit Stitchup (⌘Q)">
+              <Icon name="exit" size={20} /> Exit
+            </button>
           </nav>
           <div className="backstage-side">
             <h3>Stitchup</h3>

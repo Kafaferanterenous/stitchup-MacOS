@@ -728,6 +728,12 @@ button.active {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.backstage-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
 .backstage-side {
   flex: 1;
   padding: 14px 22px;

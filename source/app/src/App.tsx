@@ -48,6 +48,9 @@ export default function App() {
       } else if (matchesShortcut(e, SHORTCUTS.togglePane)) {
         e.preventDefault();
         store.setPaneOpen(!app.paneOpen);
+      } else if (matchesShortcut(e, SHORTCUTS.exit)) {
+        e.preventDefault();
+        void store.exitApp();
       } else if (e.key === "Escape" && app.editMode) {
         e.preventDefault();
         store.setEditMode(false);

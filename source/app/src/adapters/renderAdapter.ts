@@ -24,7 +24,12 @@ export interface RenderSession {
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export interface PdfJsLike {
-  getDocument: (args: { data: ArrayBuffer }) => { promise: Promise<pdfjsLib.PDFDocumentProxy> };
+  getDocument: (args: {
+    data: ArrayBuffer;
+    cMapUrl?: string;
+    cMapPacked?: boolean;
+    standardFontDataUrl?: string;
+  }) => { promise: Promise<pdfjsLib.PDFDocumentProxy> };
 }
 
 /** Lazily built pdf.js binding; injected for tests. */
@@ -35,6 +40,12 @@ export async function bind(doc: Document): Promise<RenderSession> {
   const loadingTask = lib.getDocument({
     // Copy so the caller's buffer stays pristine for re-renders.
     data: bytes.slice().buffer as ArrayBuffer,
+    // Bundled pdf.js resources (served from the app root): non-embedded
+    // standard fonts (Helvetica/Times/Courier...) and CID CMaps. Without
+    // these, PDFs that rely on them render with missing/blank text.
+    cMapUrl: "cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "standard_fonts/",
   });
   const pdf = await loadingTask.promise;
   return { doc, pdf };

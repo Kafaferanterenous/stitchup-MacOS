@@ -30,7 +30,8 @@ export type IconName =
   | "continuous"
   | "sidebar"
   | "thumbnails"
-  | "palette";
+  | "palette"
+  | "exit";
 
 const ICONS: Record<IconName, ReactNode> = {
   open: (
@@ -184,6 +185,13 @@ const ICONS: Record<IconName, ReactNode> = {
       <circle cx="9" cy="10" r="1.1" fill="currentColor" stroke="none" />
       <circle cx="15" cy="10" r="1.1" fill="currentColor" stroke="none" />
       <circle cx="9.5" cy="15" r="1.1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  exit: (
+    <>
+      <path d="M14 4H6a1.5 1.5 0 0 0-1.5 1.5v13A1.5 1.5 0 0 0 6 20h8" />
+      <path d="M17 8l4 4-4 4" />
+      <path d="M21 12H10" />
     </>
   ),
 };

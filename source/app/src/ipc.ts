@@ -60,3 +60,8 @@ export async function cmdSourceHash(): Promise<{ source_hash: string }> {
 export async function cmdRenderBytes(): Promise<{ bytes_b64: string }> {
   return cmd<{ bytes_b64: string }>("render_bytes");
 }
+
+/** Quit the app (File ▸ Exit). */
+export async function cmdQuit(): Promise<void> {
+  return cmd<void>("quit_app");
+}

@@ -669,3 +669,21 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   TBD). CSP is still null — left alone (tightening it needs a live pass to avoid
   breaking the pdf.js worker).
 - Not committed/pushed.
+
+2026-10-14 — TEXT-RENDERING FIX (pdf.js standard fonts/CMaps) + FILE ▸ EXIT
+- Symptom: a PDF that uses a NON-embedded standard font (e.g. Test1.pdf page 1
+  draws Helvetica) rendered with blank text. pdf.js logged
+  "Ensure that the `standardFontDataUrl` API parameter is provided" — the app
+  shipped neither pdf.js `standard_fonts/` nor `cmaps/`.
+- Fix (frontend): renderAdapter.ts `bind()` now passes cMapUrl/cMapPacked +
+  standardFontDataUrl. Assets are generated into public/ by the new
+  scripts/copy-pdfjs-assets.mjs, wired via predev/prebuild in package.json;
+  public/ is git-ignored (regenerated from node_modules on install/build).
+- Fix (File menu): new Rust command `quit_app` (app.exit(0)) + IPC cmdQuit +
+  store.exitApp(); File backstage gains an "Exit" item (new "exit" icon) and a
+  ⌘Q shortcut. capabilities unchanged (no new permission needed).
+- VERIFIED: node pdf.js probe renders pages with no standardFontDataUrl warning
+  once the URL is supplied; `npm run tauri build` green (tsc + vite + cargo);
+  fresh Stitchup.app ad-hoc signed and placed in dist/. Text render + Exit menu
+  need a live visual pass (arks).
+- Not committed/pushed at time of writing.
