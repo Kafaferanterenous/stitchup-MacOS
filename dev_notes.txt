@@ -721,3 +721,32 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
 - OPEN: full live visual acceptance pass (A-c10 selection/copy live runs), the
   macOS parity sign-off in docs/STAGE0_FIXTURES_AND_ACCEPTANCE.md, and the large
   gap vs the Windows port stitchup-Win v0.12.11.
+
+2026-10-14 (continuing) — REAL THUMBNAILS + BOOKMARKS + INLINE LIVE EDIT
+- Shared session: the pdf.js binding now lives in the store (AppState.session,
+  store.setSession). Viewer binds once per document and publishes it; unbind on
+  doc change/close (StrictMode double-invoke orphan is dropped with unbind).
+  Sidebar thumbnails reuse the SAME session — one parse, not two.
+- Real thumbnails: PageTree.Thumb now renders a lazy PagePreview canvas via
+  renderPage() on the shared session; IntersectionObserver (rootMargin 300px)
+  rasterises only near-viewport pages (large-doc F-11). Bookmarks list also shows
+  mini previews.
+- Bookmarks: star toggle (☆/★) on each thumbnail -> store.toggleBookmark(pageNo)
+  (session-only, never written to the PDF); .bookmarked accent border. Existing
+  Bookmarks tab retained.
+- Inline live editing: dropped the modal EditOverlay/EditTextModal. The text
+  layer is now always present (single click = native selection); double-clicking
+  a run opens an inline <textarea> positioned over the run, caret placed at the
+  click x (approx by run-width fraction), Enter/blur commits via the core
+  edit_text op (white-patch + Helvetica), Escape cancels. Edit Text ribbon toggle
+  adds a hover outline + hint ("Double-click a text line to edit…").
+  Edits still go through edit_text (never reflow), so the earlier note stands.
+- Dead CSS for the removed overlay (.edit-overlay, .edit-overlay-on .text-run-edit)
+  deleted; added .thumb-canvas/.thumb-bookmark/.bm-preview/.inline-editor and made
+  .viewer-hint sticky.
+- VERIFIED: npx tsc --noEmit clean; vite build green; npm run tauri build green;
+  fresh dist/Stitchup.app ad-hoc signed. Live pass: user confirms "looking better
+  — I can see text in both preview and main window". Full feature acceptance
+  (bookmark/edit interactions) still to be eyeballed.
+- OPEN: live acceptance of thumbnails/bookmarks/inline edit; then commit/push and
+  a follow-up release (v0.2.3) when asked. Do NOT commit windows_version/.

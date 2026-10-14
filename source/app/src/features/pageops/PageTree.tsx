@@ -13,8 +13,77 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppState, store } from "../../store";
+import { renderPage, type RenderSession } from "../../adapters/renderAdapter";
+
+/**
+ * Live page preview: renders the page through the SAME pdf.js session as the
+ * viewer (shared via the store) so nothing is parsed twice. The canvas is only
+ * rasterised once the thumbnail scrolls near the viewport (large-document F-11).
+ */
+function PagePreview({
+  session,
+  pageNo,
+  width,
+  rotation,
+}: {
+  session: RenderSession;
+  pageNo: number;
+  width: number;
+  rotation: number;
+}) {
+  const hostRef = useRef<HTMLSpanElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [shown, setShown] = useState(false);
+
+  useEffect(() => {
+    if (shown) return;
+    const el = hostRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setShown(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShown(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [shown]);
+
+  useEffect(() => {
+    if (!shown) return;
+    const base = session.doc.pages.find((p) => p.page_no === pageNo);
+    const widthPt = base?.width_pt ?? 612;
+    const scale = width / Math.max(1, widthPt);
+    let alive = true;
+    renderPage(session, pageNo, scale, rotation)
+      .then((r) => {
+        if (!alive) return;
+        const c = canvasRef.current;
+        if (!c) return;
+        c.width = r.image.width;
+        c.height = r.image.height;
+        c.getContext("2d")?.drawImage(r.image, 0, 0);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [shown, session, pageNo, width, rotation]);
+
+  return (
+    <span ref={hostRef} className="thumb-sheet">
+      <canvas ref={canvasRef} className="thumb-canvas" />
+    </span>
+  );
+}
 
 function Thumb({ pageNo }: { pageNo: number }) {
   const app = useAppState();
@@ -23,21 +92,47 @@ function Thumb({ pageNo }: { pageNo: number }) {
   });
   const base = app.doc?.pages.find((p) => p.page_no === pageNo);
   const selected = app.currentPage === pageNo;
+  const bookmarked = app.doc?.bookmarks.includes(pageNo) ?? false;
+  const hostRef = useRef<HTMLButtonElement | null>(null);
 
   return (
     <button
-      ref={setNodeRef}
+      ref={(el) => {
+        hostRef.current = el;
+        setNodeRef(el);
+      }}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
-      className={`thumb${selected ? " selected" : ""}`}
+      className={`thumb${selected ? " selected" : ""}${bookmarked ? " bookmarked" : ""}`}
       onClick={() => store.goToPage(pageNo)}
-      title={`Page ${pageNo} — rotation ${base?.rotation ?? 0}°`}
+      title={`Page ${pageNo} — rotation ${base?.rotation ?? 0}° · double-click ⭐ to bookmark`}
     >
+      {app.session ? (
+        <PagePreview
+          session={app.session}
+          pageNo={pageNo}
+          width={150}
+          rotation={base?.rotation ?? 0}
+        />
+      ) : (
+        <span
+          className="thumb-sheet"
+          style={{ aspectRatio: `${base?.width_pt ?? 1} / ${base?.height_pt ?? 1}` }}
+        />
+      )}
       <span
-        className="thumb-sheet"
-        style={{ aspectRatio: `${base?.width_pt ?? 1} / ${base?.height_pt ?? 1}` }}
-      />
+        className={`thumb-bookmark${bookmarked ? " on" : ""}`}
+        role="button"
+        tabIndex={0}
+        title={bookmarked ? "Remove bookmark" : "Bookmark this page"}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          store.toggleBookmark(pageNo);
+        }}>
+        {bookmarked ? "★" : "☆"}
+      </span>
       <span className="thumb-label">{pageNo}</span>
     </button>
   );
@@ -98,7 +193,7 @@ function PagesContent() {
           </div>
         </SortableContext>
       </DndContext>
-      <div className="pages-hint">Drag to reorder · right-click thumb to toggle selection</div>
+      <div className="pages-hint">Drag to reorder · click ⭐ to bookmark · right-click to select</div>
     </>
   );
 
@@ -107,7 +202,6 @@ function PagesContent() {
   }
 }
 
-// Bookmark jump button needs the page navigation from the store only.
 function BookmarksContent() {
   const app = useAppState();
   const bookmarks = app.doc?.bookmarks ?? [];
@@ -128,22 +222,35 @@ function BookmarksContent() {
       <div className="thumb-list">
         {bookmarks.length === 0 && (
           <div className="pages-empty">
-            No bookmarks yet — open a document and use “＋ Page N”.
+            No bookmarks yet — click ⭐ on a thumbnail to bookmark a page.
           </div>
         )}
-        {bookmarks.map((n) => (
-          <div className="bm-row" key={`bm-${n}`}>
-            <button className="bm-jump" onClick={() => store.goToPage(n)} title={`Go to page ${n}`}>
-              Page {n}
-            </button>
-            <button
-              className="bm-del"
-              onClick={() => void store.removeBookmark(n)}
-              title="Remove bookmark">
-              ✕
-            </button>
-          </div>
-        ))}
+        {bookmarks.map((n) => {
+          const base = app.doc?.pages.find((p) => p.page_no === n);
+          return (
+            <div className="bm-row" key={`bm-${n}`}>
+              {app.session && (
+                <span className="bm-preview">
+                  <PagePreview
+                    session={app.session}
+                    pageNo={n}
+                    width={90}
+                    rotation={base?.rotation ?? 0}
+                  />
+                </span>
+              )}
+              <button className="bm-jump" onClick={() => store.goToPage(n)} title={`Go to page ${n}`}>
+                Page {n}
+              </button>
+              <button
+                className="bm-del"
+                onClick={() => void store.removeBookmark(n)}
+                title="Remove bookmark">
+                ✕
+              </button>
+            </div>
+          );
+        })}
       </div>
       <div className="pages-hint">Bookmarks live in this session only (never written to the PDF)</div>
     </>

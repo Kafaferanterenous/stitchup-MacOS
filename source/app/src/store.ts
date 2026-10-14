@@ -17,6 +17,8 @@ import {
   openDocumentAdapter,
   pageTreeAdapter,
 } from "./adapters/structuralAdapter";
+import type { RenderSession } from "./adapters/renderAdapter";
+import { unbind } from "./adapters/renderAdapter";
 import { cmdOpen, cmdQuit, cmdRedo, cmdRenderBytes, cmdUndo, cmdUnlock } from "./ipc";
 
 export interface AppState {
@@ -41,6 +43,11 @@ export interface AppState {
   paneTab: "pages" | "bookmarks";
   /** Password prompt for a protected document (A-c6). */
   unlockOpen: boolean;
+  /**
+   * Shared pdf.js binding for the open document, owned here so both the main
+   * viewer and the sidebar thumbnails render from ONE session (bind once).
+   */
+  session: RenderSession | null;
 }
 
 let state: AppState = {
@@ -60,6 +67,7 @@ let state: AppState = {
   paneOpen: true,
   paneTab: "pages",
   unlockOpen: false,
+  session: null,
 };
 
 const listeners = new Set<() => void>();
@@ -396,6 +404,20 @@ export const store = {
     set({ doc: next, statusMessage: `Bookmarked page ${n}` });
   },
 
+  /** Add/remove a bookmark for a specific page (sidebar star toggle). */
+  toggleBookmark(n: number) {
+    const doc = state.doc;
+    if (!doc) return;
+    const has = doc.bookmarks.includes(n);
+    const next: Document = {
+      ...doc,
+      bookmarks: has
+        ? doc.bookmarks.filter((b) => b !== n)
+        : [...doc.bookmarks, n].sort((a, b) => a - b),
+    };
+    set({ doc: next, statusMessage: has ? `Bookmark removed (page ${n})` : `Bookmarked page ${n}` });
+  },
+
   async removeBookmark(n: number) {
     const doc = state.doc;
     if (!doc) return;
@@ -425,6 +447,16 @@ export const store = {
 
   setEditMode(on: boolean) {
     set({ editMode: on });
+  },
+
+  /**
+   * Swap the shared render session. Destroys the previous binding so a doc
+   * change (or close) never leaks a pdf.js worker.
+   */
+  setSession(session: RenderSession | null) {
+    const prev = state.session;
+    if (prev && prev !== session) void unbind(prev);
+    if (prev !== session) set({ session });
   },
 
   /** Track the current text-layer selection (called from selectionchange). */

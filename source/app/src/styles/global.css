@@ -227,6 +227,7 @@ select {
 }
 
 .thumb {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -244,9 +245,44 @@ select {
 }
 
 .thumb-sheet {
+  position: relative;
+  display: block;
   width: 100%;
   background: var(--bg-page);
   border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.thumb-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.thumb-bookmark {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.thumb:hover .thumb-bookmark {
+  opacity: 1;
+}
+
+.thumb-bookmark.on {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.thumb.bookmarked {
+  border-color: var(--accent);
 }
 
 .thumb-label {
@@ -282,6 +318,15 @@ select {
 .bm-row .bm-del {
   padding: 5px 8px;
   color: var(--fg-muted);
+}
+
+.bm-row .bm-preview {
+  flex: 0 0 auto;
+  width: 46px;
+}
+
+.bm-row .bm-preview .thumb-sheet {
+  width: 100%;
 }
 
 /* status bar */
@@ -437,18 +482,16 @@ button.active {
 }
 
 .viewer-hint {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  align-self: center;
   padding: 6px 12px;
   font-size: 12px;
   color: var(--fg-muted);
   background: var(--bg-toolbar);
   border: 1px solid var(--border);
   border-radius: 6px;
-}
-
-.edit-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
 }
 
 /* selectable text layer (view mode, A-c10): transparent, geometry-only */
@@ -473,20 +516,28 @@ button.active {
   background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-.edit-overlay-on .text-run-edit {
-  pointer-events: auto;
+/* inline live text editor: sits exactly over a double-clicked run */
+.inline-editor {
   position: absolute;
+  z-index: 3;
   box-sizing: border-box;
+  margin: 0;
+  padding: 0 1px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  color: #000;
+  background: #fff;
   border: 1px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 2px;
-  cursor: text;
-  transition: background 120ms ease;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-.edit-overlay-on .text-run-edit:hover {
-  background: color-mix(in srgb, var(--accent) 45%, transparent);
-  outline: 1px solid var(--accent);
+/* hover affordance for editable runs while edit mode is on */
+.page-view.edit-enabled .text-layer .text-run:hover {
+  outline: 1px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .modal textarea.edit-input {
