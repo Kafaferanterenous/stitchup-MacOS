@@ -229,12 +229,7 @@ function PageView({
     const scale = app.zoom;
     renderPage(session, pageNo, scale, rotation)
       .then((r) => {
-        if (!alive) return;
-        setRendered(r);
-        if (canvasRef.current) {
-          const ctx = canvasRef.current.getContext("2d");
-          ctx?.drawImage(r.image, 0, 0);
-        }
+        if (alive) setRendered(r);
       })
       .catch((e) => alive && setErr(String(e)));
     return () => {
@@ -242,13 +237,23 @@ function PageView({
     };
   }, [session, pageNo, app.zoom, app.zoomMode, rotation]);
 
+  // Paint only after React has committed the final canvas backing size: setting
+  // `width`/`height` on a <canvas> clears it, so drawing during the render
+  // promise (before the size is applied) would wipe the page.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!rendered || !c) return;
+    const ctx = c.getContext("2d");
+    ctx?.drawImage(rendered.image, 0, 0);
+  }, [rendered]);
+
   return (
     <div
       ref={rootRef}
       className={`page-view${err ? " has-error" : ""}`}
       style={{ width: rendered?.sizePx.width, height: rendered?.sizePx.height }}
     >
-      <canvas ref={canvasRef} width={rendered?.sizePx.width} height={rendered?.sizePx.height} />
+      <canvas ref={canvasRef} width={rendered?.image.width} height={rendered?.image.height} />
       {err && <div className="page-error">{err}</div>}
       {editMode && !err && <EditOverlay session={session} pageNo={pageNo} zoom={app.zoom} onPick={onPick} />}
       {!editMode && !err && (

@@ -107,14 +107,17 @@ select {
   flex: 1;
   display: grid;
   grid-template-columns: 260px 1fr;
+  grid-template-areas: "pages viewer";
   min-height: 0;
 }
 
 .app-body[data-pane="hidden"] {
   grid-template-columns: 1fr;
+  grid-template-areas: "viewer";
 }
 
 .viewer-pane {
+  grid-area: viewer;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -169,6 +172,7 @@ select {
 
 /* page thumbnails */
 .pages-pane {
+  grid-area: pages;
   border-right: 1px solid var(--border);
   background: var(--bg-pages);
   display: flex;
