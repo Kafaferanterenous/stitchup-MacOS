@@ -750,3 +750,19 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   (bookmark/edit interactions) still to be eyeballed.
 - OPEN: live acceptance of thumbnails/bookmarks/inline edit; then commit/push and
   a follow-up release (v0.2.3) when asked. Do NOT commit windows_version/.
+
+2026-10-15 — RELEASE v0.2.3 (Stage 1.8 prebuilt)
+- Re-verified the Stage 1.8 tree (d8df563, already pushed; local == origin/main):
+    * frontend `npm run build` (tsc --noEmit + vite) GREEN.
+    * core `cargo test` 11/11 (stage1 10 + dbg_esave 1).
+    * src-tauri `cargo test` command_layer 9/9.
+    * `npm run tauri build` GREEN (4m06s); fresh bundle produced.
+- Fresh Stitchup.app ad-hoc signed (codesign --force --deep --sign -; verify
+  --deep --strict OK), copied to dist/Stitchup.app, zipped to
+  dist/Stitchup-MacOS-v0.2.3.zip (5.71 MB, --keepParent, root = Stitchup.app).
+- GitHub release v0.2.3 on stitchup-MacOS with asset Stitchup-MacOS-v0.2.3.zip.
+- NOTE: the automated live-visual acceptance pass was NOT performed by the agent
+  (this model cannot read images). Screenshots captured for human review:
+  /tmp/stitchup-v023.png (idle app). The launch smoke-test passed (app stays up,
+  no crash report). Thumbnails/bookmarks/inline-edit still need a human eyeball.
+- AGENTS.md map updated to v0.2.3. Do NOT commit windows_version/.
