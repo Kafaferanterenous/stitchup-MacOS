@@ -48,6 +48,8 @@ export interface AppState {
    * viewer and the sidebar thumbnails render from ONE session (bind once).
    */
   session: RenderSession | null;
+  /** CSS size of the scrolling viewer area (for fit-page/fit-width). */
+  viewport: { width: number; height: number };
 }
 
 let state: AppState = {
@@ -68,6 +70,7 @@ let state: AppState = {
   paneTab: "pages",
   unlockOpen: false,
   session: null,
+  viewport: { width: 0, height: 0 },
 };
 
 const listeners = new Set<() => void>();
@@ -377,6 +380,39 @@ export const store = {
 
   setZoom(z: number, mode: AppState["zoomMode"]) {
     set({ zoom: z, zoomMode: mode });
+  },
+
+  /**
+   * Switch to a fit mode; the exact scale is computed by Viewer (which owns the
+   * viewport measurement) on the next render via applyFit().
+   */
+  setFitMode(mode: "fit-page" | "fit-width") {
+    set({ zoomMode: mode });
+  },
+
+  /**
+   * Called by the Viewer with the measured viewport and the current page's
+   * visible size so a fit mode produces an exact scale. No-op in custom/actual.
+   */
+  applyFit(viewport: { width: number; height: number }, page: { width: number; height: number }) {
+    const mode = state.zoomMode;
+    if (mode !== "fit-page" && mode !== "fit-width") return;
+    const pad = 18; // must match .viewer-scroll padding
+    const availW = Math.max(1, viewport.width - pad * 2);
+    const availH = Math.max(1, viewport.height - pad * 2);
+    const w = Math.max(1, page.width);
+    const h = Math.max(1, page.height);
+    let z = mode === "fit-width" ? availW / w : Math.min(availW / w, availH / h);
+    z = Math.max(0.25, Math.min(5, z));
+    if (Math.abs(z - state.zoom) < 0.001) return;
+    set({ zoom: z });
+  },
+
+  /** Record the scrolling viewport size (drives fit-page/fit-width). */
+  setViewport(width: number, height: number) {
+    const p = state.viewport;
+    if (p.width === width && p.height === height) return;
+    set({ viewport: { width, height } });
   },
 
   setViewMode(mode: AppState["viewMode"]) {

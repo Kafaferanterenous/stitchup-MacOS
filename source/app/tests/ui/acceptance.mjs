@@ -269,6 +269,68 @@ async function main() {
     // back to Pages
     await page.locator('.pane-tab:has-text("Pages")').click();
 
+    // --- Fit page / fit width recompute the zoom from the viewport -----------
+    await page.locator('.ribbon-tab:text-is("View")').click();
+    await page.locator('[title="Fit page"]').click();
+    await page.waitForFunction(
+      () => {
+        const scroll = document.querySelector(".viewer-scroll");
+        const view = document.querySelector(".page-view");
+        if (!scroll || !view) return false;
+        const availH = scroll.clientHeight - 36;
+        const availW = scroll.clientWidth - 36;
+        const vr = view.getBoundingClientRect();
+        return (
+          Math.abs(vr.height - availH) < 4 ||
+          Math.abs(vr.width - availW) < 4
+        );
+      },
+      undefined,
+      { timeout: 8000 },
+    );
+    const fitPage = await page.evaluate(() => {
+      const scroll = document.querySelector(".viewer-scroll");
+      const view = document.querySelector(".page-view");
+      const vr = view.getBoundingClientRect();
+      const availH = scroll.clientHeight - 36;
+      return { viewH: Math.round(vr.height), availH: Math.round(availH) };
+    });
+    check(
+      "fit page scales the page to the viewport height",
+      Math.abs(fitPage.viewH - fitPage.availH) < 4,
+      `${fitPage.viewH} vs ${fitPage.availH}`,
+    );
+
+    await page.locator('[title="Fit width"]').click();
+    await page.waitForFunction(
+      () => {
+        const scroll = document.querySelector(".viewer-scroll");
+        const view = document.querySelector(".page-view");
+        if (!scroll || !view) return false;
+        const availW = scroll.clientWidth - 36;
+        const vr = view.getBoundingClientRect();
+        return Math.abs(vr.width - availW) < 4;
+      },
+      undefined,
+      { timeout: 8000 },
+    );
+    const fitWidth = await page.evaluate(() => {
+      const scroll = document.querySelector(".viewer-scroll");
+      const view = document.querySelector(".page-view");
+      const vr = view.getBoundingClientRect();
+      const availW = scroll.clientWidth - 36;
+      return { viewW: Math.round(vr.width), availW: Math.round(availW) };
+    });
+    check(
+      "fit width scales the page to the viewport width",
+      Math.abs(fitWidth.viewW - fitWidth.availW) < 4,
+      `${fitWidth.viewW} vs ${fitWidth.availW}`,
+    );
+    // Actual (1:1) resets to 100%
+    await page.locator('[title="Actual (1:1)"]').click();
+    const pct = await page.locator(".ribbon-readout").textContent();
+    check("actual reset returns to 100%", /100\s*%/.test(pct ?? ""), pct?.trim());
+
     // --- Inline text edit: double-click a run opens the inline editor --------
     await page.locator(".text-run").first().dblclick();
     await page.waitForSelector(".inline-editor", { timeout: 5000 });

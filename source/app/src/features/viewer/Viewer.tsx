@@ -263,6 +263,24 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
 export function Viewer() {
   const app = useAppState();
   const [err, setErr] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Track the scrolling viewport size so fit-page/fit-width can compute an
+  // exact scale, and recompute whenever the window/pane changes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => store.setViewport(el.clientWidth, el.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // Re-run once the session arrives (the scroll container only mounts then).
+  }, [app.doc?.bytesB64, app.session]);
 
   // Mirror the document selection into the store so Copy can enable/disable and
   // report a count (A-c10).
@@ -273,6 +291,27 @@ export function Viewer() {
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, []);
+
+  // Fit-page / fit-width: derive the scale from the measured viewport and the
+  // current page's (rotation-swapped) point size. Re-runs on resize, pane
+  // toggle, page change and document change, so the fit stays exact.
+  useEffect(() => {
+    const meta = app.doc?.pages.find((p) => p.page_no === app.currentPage);
+    if (!meta) return;
+    const vp = app.viewport;
+    if (vp.width <= 0 || vp.height <= 0) return;
+    const swapped = ((meta.rotation % 180) + 180) % 180 === 90;
+    store.applyFit(vp, {
+      width: swapped ? meta.height_pt : meta.width_pt,
+      height: swapped ? meta.width_pt : meta.height_pt,
+    });
+  }, [
+    app.viewport,
+    app.zoomMode,
+    app.currentPage,
+    app.doc?.bytesB64,
+    app.doc?.pages,
+  ]);
 
   // Bind pdf.js once per document and publish the session to the store so the
   // sidebar thumbnails reuse it. Closing/replacing the doc destroys the binding.
@@ -343,7 +382,11 @@ export function Viewer() {
   }
 
   return (
-    <div className="viewer-scroll">
+    <div
+      className="viewer-scroll"
+      ref={(el) => {
+        scrollRef.current = el;
+      }}>
       {overlay}
       {body}
     </div>

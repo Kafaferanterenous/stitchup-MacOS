@@ -391,8 +391,8 @@ export function Ribbon() {
                 <div className="rb-grid">
                   <Small icon="zoom-out" label="Zoom −" onClick={() => store.setZoom(Math.max(0.25, app.zoom - 0.1), "custom")} disabled={!doc} />
                   <Small icon="zoom-in" label="Zoom +" onClick={() => store.setZoom(Math.min(5, app.zoom + 0.1), "custom")} disabled={!doc} />
-                  <Small icon="fit-page" label="Fit page" onClick={() => store.setZoom(app.zoom, "fit-page")} disabled={!doc} active={app.zoomMode === "fit-page"} />
-                  <Small icon="fit-width" label="Fit width" onClick={() => store.setZoom(app.zoom, "fit-width")} disabled={!doc} active={app.zoomMode === "fit-width"} />
+                  <Small icon="fit-page" label="Fit page" onClick={() => store.setFitMode("fit-page")} disabled={!doc} active={app.zoomMode === "fit-page"} />
+                  <Small icon="fit-width" label="Fit width" onClick={() => store.setFitMode("fit-width")} disabled={!doc} active={app.zoomMode === "fit-width"} />
                   <Small icon="actual" label="Actual (1:1)" onClick={() => store.setZoom(1, "actual")} disabled={!doc} active={app.zoomMode === "actual"} />
                 </div>
                 <span className="ribbon-readout">{Math.round(app.zoom * 100)}%</span>

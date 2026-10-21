@@ -831,3 +831,24 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   XP-theme workspace with no white page area (no document open). Kept the
   generated retina shot (PDF open) as docs/screenshot.png hero and added the
   manual capture as docs/screenshot-window.png; README shows both.
+
+2026-10-21 (later) — FIT-PAGE / FIT-WIDTH IMPLEMENTED (Stage 1 gap)
+- The fit buttons only relabelled the mode; app.zoom was never recomputed, so
+  "Fit page"/"Fit width" did nothing (documented as OPEN earlier this session).
+- Fix: store gains viewport {width,height} + setViewport(w,h) + setFitMode(mode)
+  + applyFit(viewport,pagePtSize). Viewer measures .viewer-scroll via
+  ResizeObserver and publishes the size (deps [doc.bytesB64, session], because
+  the scroll container only mounts AFTER the pdf.js session arrives — the first
+  pass had a stale-ref bug where the effect ran while the "Parsing document…"
+  placeholder was showing). A second effect computes the fit scale from the
+  current page's rotation-swapped pt size; re-runs on resize, pane toggle, page
+  change and doc change. applyFit clamps to [0.25, 5] and no-ops in custom/actual
+  (0.001 dead-band to avoid loops). Ribbon zoom buttons + App shortcuts now call
+  setFitMode; "Actual (1:1)" still calls setZoom(1,"actual").
+- Result: a 612x792 page in a 1140x687 shelf opens at 79% (fits height); the
+  fit buttons recompute against the live viewport. Default mode is fit-page, so
+  documents now open fitted (was: always 100%).
+- Harness: acceptance.mjs now 13/13 (added fit page, fit width, actual-reset
+  checks; must click the "View" ribbon tab first — the Zoom group lives there).
+- Re-generated docs/screenshot.png with fit active (viewer 416x538, still shows
+  the whole page and all content bands). Committed.

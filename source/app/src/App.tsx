@@ -36,10 +36,10 @@ export default function App() {
         store.setZoom(app.zoom / 1.1, "custom");
       } else if (matchesShortcut(e, SHORTCUTS.fitPage)) {
         e.preventDefault();
-        store.setZoom(app.zoom, "fit-page");
+        store.setFitMode("fit-page");
       } else if (matchesShortcut(e, SHORTCUTS.fitWidth)) {
         e.preventDefault();
-        store.setZoom(app.zoom, "fit-width");
+        store.setFitMode("fit-width");
       } else if (matchesShortcut(e, SHORTCUTS.toggleView)) {
         e.preventDefault();
         const modes = CYCLE_VIEW;
