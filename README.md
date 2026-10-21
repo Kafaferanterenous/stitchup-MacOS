@@ -7,6 +7,8 @@ a copy of any commercial product.
 
 ![Stitchup running on macOS — ribbon, page thumbnails, bookmarks and a PDF open in the viewer](docs/screenshot.png)
 
+![Stitchup's main window in the XP theme — ribbon, page pane, canvas and status bar](docs/screenshot-window.png)
+
 Status: **Stage 0 (design contract) complete; Stage 1 built and running on
 macOS.** The Rust structural core (`source/core`) compiles, `cargo test` is
 green (core stage-1 acceptance + a headless Tauri session-layer suite in

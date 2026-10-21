@@ -826,3 +826,8 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   sets the mode label; app.zoom is never recomputed, so the fit buttons do not
   actually fit. Also the 100%-zoom screenshot pass: dpr1 vs dpr2 parity should
   be added to the harness (assert backing == CSS * devicePixelRatio).
+- User supplied a real window capture (Screenshot 2026-10-21 at 2.38.24 PM.png,
+  1203x802, taken 14:38 before the retina fix build). Pixel analysis shows the
+  XP-theme workspace with no white page area (no document open). Kept the
+  generated retina shot (PDF open) as docs/screenshot.png hero and added the
+  manual capture as docs/screenshot-window.png; README shows both.
