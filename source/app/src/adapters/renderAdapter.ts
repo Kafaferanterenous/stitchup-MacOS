@@ -66,10 +66,14 @@ export async function renderPage(
   rotation: number,
 ): Promise<RenderedPage> {
   const page = await session.pdf.getPage(pageNumber);
-  const viewport = page.getViewport({ scale, rotation: rotation % 360 });
+  // Render at devicePixelRatio so the raster fills the whole backing store;
+  // pdf.js paints at viewport scale, so a dpr-inflated backing with a CSS-scale
+  // viewport would leave the page in the top-left corner on HiDPI screens.
+  const dpr = window.devicePixelRatio ?? 1;
+  const viewport = page.getViewport({ scale: scale * dpr, rotation: rotation % 360 });
   const canvas = document.createElement("canvas");
-  canvas.width = Math.ceil(viewport.width * (window.devicePixelRatio ?? 1));
-  canvas.height = Math.ceil(viewport.height * (window.devicePixelRatio ?? 1));
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("canvas 2d context unavailable");
@@ -79,10 +83,10 @@ export async function renderPage(
     viewport,
   }).promise;
 
-  const sizePt = { width: viewport.width / scale, height: viewport.height / scale };
+  const sizePt = { width: viewport.width / (scale * dpr), height: viewport.height / (scale * dpr) };
   return {
     image: canvas,
-    sizePx: { width: viewport.width, height: viewport.height },
+    sizePx: { width: viewport.width / dpr, height: viewport.height / dpr },
     sizePt,
     rotation,
   };

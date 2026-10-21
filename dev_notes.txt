@@ -796,3 +796,33 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   chromium` (browsers cache only, not in repo). package.json gains "test:ui".
 - Still uncommitted at time of writing (pending go-ahead). Do NOT commit
   windows_version/.
+
+2026-10-21 — REPO PUBLIC + REAL UI SCREENSHOT + HiDPI RENDER FIX
+- Repo flipped PRIVATE -> PUBLIC on Kafaferanterenous/stitchup-MacOS (user
+  request). AGENTS.md map updated.
+- Added source/app/tests/ui/screenshot.mjs (headless Playwright, same Tauri stub
+  as acceptance.mjs, deviceScaleFactor 2). It builds a 3-page demo PDF with
+  pdf-lib (accent header band, bullets, wrapped Times body, page footer), opens
+  it, stars page 2, zooms out twice (Meta+-), and writes docs/screenshot.png
+  (2800x1800). No app source is modified for the shot.
+- BUG FOUND (user-visible on every Retina Mac, shipped since Stage 1):
+  renderAdapter.renderPage inflated the canvas backing store by
+  window.devicePixelRatio but passed pdf.js a CSS-scale viewport, so the raster
+  was painted at 1x into the top-left quarter of a 2x canvas. At dpr=1 (the
+  headless harness default) nothing shows; at dpr=2 the page appears as a
+  half-size image in the corner, the rest white. This is why the first
+  screenshots looked half-empty — not a fixture/pdf.js issue.
+  FIX: render at scale*dpr, keep canvas backing = viewport pixels, and report
+  sizePx = viewport/dpr (CSS) so the viewer div and thumbnail CSS still size the
+  element while the backing stays crisp. Thumbnails inherit the fix via the
+  shared renderPage path.
+- Verification: npm run build GREEN; npm run test:ui 10/10 (one bookmark
+  mini-preview check is lazy-render flaky, passed on re-run); screenshot
+  canvas band analysis now shows continuous text from the release-notes heading
+  through the paragraph and the page footer (previously only the top band +
+  footer appeared, everything between was pure white 255).
+- README now embeds docs/screenshot.png at the top.
+- OPEN (found this session, not fixed): zoomMode "fit-page"/"fit-width" only
+  sets the mode label; app.zoom is never recomputed, so the fit buttons do not
+  actually fit. Also the 100%-zoom screenshot pass: dpr1 vs dpr2 parity should
+  be added to the harness (assert backing == CSS * devicePixelRatio).
