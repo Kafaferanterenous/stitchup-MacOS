@@ -766,3 +766,33 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   /tmp/stitchup-v023.png (idle app). The launch smoke-test passed (app stays up,
   no crash report). Thumbnails/bookmarks/inline-edit still need a human eyeball.
 - AGENTS.md map updated to v0.2.3. Do NOT commit windows_version/.
+
+2026-10-15 (continuing) — HEADLESS UI ACCEPTANCE HARNESS (Stage 1.8)
+- Added source/app/tests/ui/acceptance.mjs (npm run test:ui). It loads the REAL
+  built frontend (source/app/dist) in headless Chromium via Playwright, serving
+  dist from a tiny static server, and stubs `window.__TAURI_INTERNALS__.invoke`
+  (the single dispatch point @tauri-apps/api + plugin-dialog use) with an
+  OpenResult derived from a fixture. The renderer is the real pdf.js build, so
+  what renders here is what ships. No app source is modified for the test.
+- Asserts 10 checks (all GREEN): sidebar thumbnails rasterise ink (297/301/302),
+  main viewer paints ink, text layer exposes selectable runs, star toggles a page
+  bookmark (☆->★, Bookmarks tab count (1), entry + mini-preview render), and
+  double-click opens the inline editor which Escape dismisses. Delete throws on
+  any unmocked Tauri command so coverage gaps are loud.
+- Identified an earlier stopgap: source/app/tests/ui/gen-sample.mjs and one-off
+  probe/smoke scripts were used during bring-up and removed; only acceptance.mjs
+  is kept.
+- FINDING (fixtures, not the app): the Rust-generated fixtures in
+  fixtures/generated/F-*.pdf declare /FlateDecode but store RAW content streams
+  beginning "BT ..." (verified: F-01 stream bytes = 42 54 20 2f = "BT /"). pdf.js
+  logs "Unknown compression method in flate stream: 66, 84" and renders them
+  BLANK; lopdf/structure tests never decompress, so this went unnoticed. Real
+  user PDFs render fine (the app is not affected at runtime). Because of this the
+  harness synthesizes a valid 3-page PDF with pdf-lib (a real app dep) instead of
+  using the broken fixtures — pass a known-good path as argv[2] to override.
+  TODO follow-up: fix the core fixture generator to actually deflate (or drop the
+  Filter), then re-run A-c1 as a UI check.
+- Tooling: added playwright devDependency (^1.64.1) + `npx playwright install
+  chromium` (browsers cache only, not in repo). package.json gains "test:ui".
+- Still uncommitted at time of writing (pending go-ahead). Do NOT commit
+  windows_version/.

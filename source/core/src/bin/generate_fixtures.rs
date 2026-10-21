@@ -71,6 +71,19 @@ fn new_doc() -> (PdfDoc, (u32, u16)) {
     (doc, pages_id)
 }
 
+/// zlib-compress stream data so a `/Filter /FlateDecode` stream is actually
+/// deflated. The raw content must never be stored under a FlateDecode filter —
+/// renderers (pdf.js) reject that with "Unknown compression method in flate
+/// stream" and draw a blank page.
+fn flate(data: &[u8]) -> Vec<u8> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(data).unwrap();
+    enc.finish().unwrap()
+}
+
 /// Page content stream data for a bare text page using standard Helvetica.
 fn text_content(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() + 80);
@@ -116,7 +129,7 @@ fn add_page(
     resources: Object,
     annots: Option<Object>,
 ) -> (u32, u16) {
-    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, content.to_vec()));
+    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, flate(content)));
     let mut page_dict = dictionary! {
         "Type" => Object::Name("Page".into()),
         "Parent" => Object::Reference(pages_id),
@@ -267,7 +280,7 @@ fn encrypted_document() -> PdfDoc {
 
 fn acroform_document() -> PdfDoc {
     let (mut doc, pages) = new_doc();
-    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, text_content("Fill me.")));
+    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, flate(&text_content("Fill me."))));
     let field_def = |doc: &mut PdfDoc, name: &str, ft: &str, rect: Object, page_id: (u32, u16)| {
         doc.add_object(Object::Dictionary(dictionary! {
             "Type" => Object::Name("Annot".into()),
@@ -303,7 +316,7 @@ fn acroform_document() -> PdfDoc {
 
 fn annotations_document() -> PdfDoc {
     let (mut doc, pages) = new_doc();
-    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, text_content("Has a note.")));
+    let cid = doc.add_object(Stream::new(dictionary! {"Filter" => "FlateDecode"}, flate(&text_content("Has a note."))));
     let note_id = doc.add_object(Object::Dictionary(dictionary! {
         "Type" => Object::Name("Annot".into()),
         "Subtype" => Object::Name("Text".into()),
@@ -352,7 +365,7 @@ fn attachments_document() -> PdfDoc {
             "Params" => Object::Dictionary(dictionary! { "Size" => Object::Integer(payload.len() as i64) }),
             "Filter" => Object::Name("FlateDecode".into()),
         },
-        payload,
+        flate(&payload),
     ));
     let fs_id = doc.add_object(Object::Dictionary(dictionary! {
         "Type" => Object::Name("Filespec".into()),
@@ -407,7 +420,7 @@ fn pdfa_lite_document() -> PdfDoc {
             "Subtype" => Object::Name("XML".into()),
             "Filter" => Object::Name("FlateDecode".into()),
         },
-        xmp.into_bytes(),
+        flate(xmp.as_bytes()),
     ));
     if let Some(cat) = doc.trailer.get(b"Root").ok().and_then(|r| r.as_reference().ok()).and_then(|r| doc.objects.get_mut(&r)).and_then(|o| o.as_dict_mut().ok()) {
         cat.set("Metadata", Object::Reference((m_id.0, m_id.1)));
