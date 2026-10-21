@@ -852,3 +852,18 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   checks; must click the "View" ribbon tab first — the Zoom group lives there).
 - Re-generated docs/screenshot.png with fit active (viewer 416x538, still shows
   the whole page and all content bands). Committed.
+
+2026-10-21 (later) — A-c9 SEARCH MATCH HIGHLIGHTING
+- Search previously found hits and jumped pages but drew NOTHING, and counted
+  one hit per text run (a run with two occurrences counted once). Fixed both:
+  - renderAdapter.search() now scans every occurrence in each run and emits one
+    SearchResult per match with a sub-rect narrowed to the matched span
+    (fractional x/width within the run), so counts are honest and boxes are tight.
+  - Hits are published to the store (searchHits + searchIndex). SearchBar reuses
+    the shared session instead of binding a second pdf.js worker, and clears
+    highlights when the query is emptied.
+  - Viewer renders a paint-only .search-highlights layer between the page raster
+    and the pointer-active text layer; every hit on the current page gets a box,
+    the active one (searchIndex) a distinct "current" style. Non-interactive.
+- Harness: acceptance.mjs now 16/16 (search count 1/3, 3 highlight boxes, next
+  marks exactly one current). Committed.
