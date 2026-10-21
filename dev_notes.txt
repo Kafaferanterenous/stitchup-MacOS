@@ -867,3 +867,34 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
     the active one (searchIndex) a distinct "current" style. Non-interactive.
 - Harness: acceptance.mjs now 16/16 (search count 1/3, 3 highlight boxes, next
   marks exactly one current). Committed.
+
+2026-10-21 (session pause) — STATE OF PLAY
+- Committed & pushed-worthy this session (all on main, ff from origin):
+  * 9770b7c HiDPI page render fix + real UI screenshot
+  * 6d72741 add user window capture as second screenshot
+  * f5c241c real fit-page/fit-width zoom (viewport measure + recompute)
+  * bcfce33 A-c9 search match highlighting + per-occurrence count
+  (plus the v0.2.4 prebuilt release was published from this session)
+- STILL UNCOMMITTED (working tree) at pause:
+  * NOTHING in app source — A-c15/A-c14 work had only just STARTED (no edits made
+    yet; only read store.ts around insertBlank/extract/merge).
+- NEXT UP (in order):
+  1. A-c15: wire store.extract() into the UI (no caller today). Candidate spot:
+     Pages ribbon group or page-tree context/lasso selection -> "Extract…" /
+     "Split…" that saves the selected pages as a NEW file (Save As dialog via
+     commit path). merge UI already exists in the Insert group.
+  2. A-c14: insert-blank callers hardcode 612x792; spec says the new page must
+     DEFAULT TO THE CURRENT/FIRST PAGE SIZE. Change Ribbon/PageTree callers to
+     pass the current page's width_pt/height_pt (rotation-swapped) instead of a
+     constant. Verify with F-03 (420x594) in the harness.
+  3. A-c6: render doc.warnings (permissions flags / XFA / attachments) in the UI
+     — they are produced by core + carried on Document but never displayed.
+  4. DoD #6: About -> Licenses from STAGE0_DEPENDENCY_LEDGER.
+  5. Harness expansions: open a REAL F-01 fixture (generator now deflates, the
+     stale "renders blank" note is obsolete), zoom 1.0/3.0 ink, selection/copy
+     clipboard assertion, reorder-after-undo staleness in PageTree local order.
+  6. macOS parity sheet (docs/STAGE1_*_macOS.md) + record non-functional budgets
+     (cold start, idle mem, F-11 open, save-as) — none recorded yet.
+- Harness currently 16/16; build green; dist is current (fit + search in it).
+- Reminder: never commit windows_version/. Leave source/core/fixtures/ and the
+  stray "Screenshot 2026-10-21 at 2.38.24 PM.png" untracked.
