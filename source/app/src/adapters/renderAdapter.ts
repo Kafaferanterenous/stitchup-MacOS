@@ -128,17 +128,32 @@ export async function search(
   pageRange: [number, number],
 ): Promise<SearchResult[]> {
   const q = query.toLocaleLowerCase();
+  if (!q) return [];
   const hits: SearchResult[] = [];
   for (let p = pageRange[0]; p <= pageRange[1]; p++) {
     const runs = await getTextRuns(session, p);
     for (const run of runs) {
-      const idx = run.str.toLocaleLowerCase().indexOf(q);
-      if (idx >= 0) {
+      const hay = run.str.toLocaleLowerCase();
+      // Emit one result per occurrence, not per run, so the count is honest
+      // and each match gets its own highlight box.
+      let from = 0;
+      for (;;) {
+        const idx = hay.indexOf(q, from);
+        if (idx < 0) break;
+        const frac0 = run.str.length > 0 ? idx / run.str.length : 0;
+        const frac1 =
+          run.str.length > 0 ? (idx + q.length) / run.str.length : 0;
         hits.push({
           page_no: p,
-          rect: { ...run.rect },
+          rect: {
+            x: run.rect.x + run.rect.width * frac0,
+            y: run.rect.y,
+            width: run.rect.width * (frac1 - frac0),
+            height: run.rect.height,
+          },
           match_text: run.str.slice(idx, idx + q.length),
         });
+        from = idx + Math.max(1, q.length);
       }
     }
   }

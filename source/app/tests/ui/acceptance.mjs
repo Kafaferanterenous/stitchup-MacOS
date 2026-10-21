@@ -331,6 +331,23 @@ async function main() {
     const pct = await page.locator(".ribbon-readout").textContent();
     check("actual reset returns to 100%", /100\s*%/.test(pct ?? ""), pct?.trim());
 
+    // --- Search highlights every occurrence across pages (A-c9) --------------
+    await page.locator(".search-bar input").fill("quick");
+    await page.locator('.search-bar button:has-text("Search")').click();
+    await page.waitForFunction(
+      () => /\/\d+/.test(document.querySelector(".search-status")?.textContent ?? ""),
+      undefined,
+      { timeout: 8000 },
+    );
+    const status = (await page.locator(".search-status").textContent())?.trim();
+    const hits = await page.locator(".search-hit").count();
+    check("search reports hit count", /^1\/\d+$/.test(status ?? ""), status);
+    check("search paints highlight boxes", hits >= 1, `${hits} boxes`);
+    // Next advances to the next match and marks exactly one as current.
+    await page.locator('.search-bar button:has-text("›")').click();
+    const current = await page.locator(".search-hit.current").count();
+    check("next advances to a single current hit", current === 1, `${current} current`);
+
     // --- Inline text edit: double-click a run opens the inline editor --------
     await page.locator(".text-run").first().dblclick();
     await page.waitForSelector(".inline-editor", { timeout: 5000 });

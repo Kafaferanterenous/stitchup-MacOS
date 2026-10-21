@@ -9,7 +9,7 @@
 //! source of truth.
 
 import { useSyncExternalStore } from "react";
-import type { Document, Operation, TextEditParams } from "./types";
+import type { Document, Operation, SearchResult, TextEditParams } from "./types";
 import {
   commitAdapter,
   documentFromOpen,
@@ -50,6 +50,10 @@ export interface AppState {
   session: RenderSession | null;
   /** CSS size of the scrolling viewer area (for fit-page/fit-width). */
   viewport: { width: number; height: number };
+  /** Active search hits to highlight in the viewer (A-c9). */
+  searchHits: SearchResult[];
+  /** Index of the current hit within `searchHits` (-1 when none). */
+  searchIndex: number;
 }
 
 let state: AppState = {
@@ -71,6 +75,8 @@ let state: AppState = {
   unlockOpen: false,
   session: null,
   viewport: { width: 0, height: 0 },
+  searchHits: [],
+  searchIndex: -1,
 };
 
 const listeners = new Set<() => void>();
@@ -413,6 +419,16 @@ export const store = {
     const p = state.viewport;
     if (p.width === width && p.height === height) return;
     set({ viewport: { width, height } });
+  },
+
+  /** Publish search hits + the current index so the viewer highlights them. */
+  setSearch(hits: SearchResult[], index: number) {
+    set({ searchHits: hits, searchIndex: index });
+  },
+
+  /** Move to a specific search hit index (wraps handled by the caller). */
+  setSearchIndex(index: number) {
+    set({ searchIndex: index });
   },
 
   setViewMode(mode: AppState["viewMode"]) {

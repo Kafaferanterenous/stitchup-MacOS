@@ -495,6 +495,28 @@ button.active {
 }
 
 /* selectable text layer (view mode, A-c10): transparent, geometry-only */
+/* search match highlights (A-c9): a paint-only layer above the page raster,
+   below the (pointer-active) text layer; never intercepts clicks. */
+.search-highlights {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.search-hit {
+  position: absolute;
+  border-radius: 1px;
+  background: color-mix(in srgb, #ffd400 45%, transparent);
+  mix-blend-mode: multiply;
+}
+
+.search-hit.current {
+  background: color-mix(in srgb, #ff8c00 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #ff8c00 80%, transparent);
+}
+
 .text-layer {
   position: absolute;
   inset: 0;

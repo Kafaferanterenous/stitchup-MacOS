@@ -235,6 +235,24 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
       style={{ width: rendered?.sizePx.width, height: rendered?.sizePx.height }}>
       <canvas ref={canvasRef} width={rendered?.image.width} height={rendered?.image.height} />
       {err && <div className="page-error">{err}</div>}
+      {!err && (
+        <div className="search-highlights">
+          {app.searchHits.map((h, i) =>
+            h.page_no === pageNo ? (
+              <span
+                key={i}
+                className={`search-hit${i === app.searchIndex ? " current" : ""}`}
+                style={{
+                  left: h.rect.x * app.zoom,
+                  top: h.rect.y * app.zoom,
+                  width: Math.max(2, h.rect.width * app.zoom),
+                  height: Math.max(2, h.rect.height * app.zoom),
+                }}
+              />
+            ) : null,
+          )}
+        </div>
+      )}
       {!err && visible && (
         <TextLayer
           session={session}
