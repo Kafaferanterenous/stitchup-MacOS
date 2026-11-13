@@ -11,12 +11,19 @@ pub mod hash;
 pub mod model;
 pub mod oplog;
 pub mod ops;
+pub mod textedit;
+pub mod docops;
+pub mod sign;
+pub mod annots;
+pub mod objects;
+pub mod std14;
+pub mod forms;
 
 pub use error::{EngineError, ErrorCode};
 pub use model::{
     build_open_info, collect_pages, page_rotation, read_metadata, Metadata, OpenInfo, PageMeta,
 };
 pub use ops::{
-    commit_export, delete_pages, extract, insert_blank, merge_doc, open_bytes, open_path, reorder,
+    commit_export, delete_pages, extract, flatten_page_tree, insert_blank, split, merge_doc, open_bytes, open_path, reorder,
     rotate_pages, set_metadata, unlock_document, CommitResult,
 };

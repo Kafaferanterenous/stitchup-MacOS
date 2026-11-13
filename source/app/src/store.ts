@@ -9,7 +9,7 @@
 //! source of truth.
 
 import { useSyncExternalStore } from "react";
-import type { Document, Operation, SearchResult, TextEditParams } from "./types";
+import type { CommitResult, Document, EditResult, InPlaceEdit, Operation, SearchResult } from "./types";
 import {
   commitAdapter,
   documentFromOpen,
@@ -19,7 +19,41 @@ import {
 } from "./adapters/structuralAdapter";
 import type { RenderSession } from "./adapters/renderAdapter";
 import { unbind } from "./adapters/renderAdapter";
-import { cmdOpen, cmdQuit, cmdRedo, cmdRenderBytes, cmdUndo, cmdUnlock } from "./ipc";
+import {
+  cmdAdoptPath,
+  cmdCombine,
+  cmdEditText,
+  cmdExportPages,
+  cmdNew,
+  cmdOpen,
+  cmdQuit,
+  cmdRedo,
+  cmdRenderBytes,
+  cmdSave,
+  cmdSetCrop,
+  cmdSplit,
+  cmdUndo,
+  cmdUnlock,
+  cmdWatermark,
+  cmdAddAnnotation,
+  cmdDeleteAnnotation,
+  cmdMoveAnnotation,
+  cmdRedact,
+  cmdObjectOp,
+  cmdInsertShape,
+  cmdSetField,
+  cmdInsertImage,
+} from "./ipc";
+import { search as searchText } from "./adapters/renderAdapter";
+
+/** Virtual path prefix the backend gives never-saved documents. */
+export const UNTITLED = "stitchup-untitled:";
+export const isUntitled = (doc: Document | null) => !!doc && doc.path.startsWith(UNTITLED);
+export function docName(doc: Document | null): string {
+  if (!doc) return "";
+  if (isUntitled(doc)) return `Untitled ${doc.path.slice(UNTITLED.length)}`;
+  return doc.path.split(/[\\/]/).pop() ?? doc.path;
+}
 
 export interface AppState {
   doc: Document | null;
@@ -54,13 +88,99 @@ export interface AppState {
   searchHits: SearchResult[];
   /** Index of the current hit within `searchHits` (-1 when none). */
   searchIndex: number;
+  /** Bumped when the viewer should scroll `currentPage` into view. */
+  scrollSeq: number;
+  /** Which secondary dialog is open. */
+  dialog: Dialog;
+  /** Pages selected in the sidebar (empty = just the current page). */
+  selection: number[];
+  /** `doc.history.length` when last saved/opened (dirty when different). */
+  savedLen: number;
+  /** Current search text (Find, ⌘F / F3). */
+  query: string;
+  /** Ribbon tab shown (also switched from the Tabs menu). */
+  ribbonTab: RibbonTabName;
+  /** Armed drawing / selection tool (null = normal reading + text select). */
+  tool: Tool | null;
+  /** Label used by the Stamp tool. */
+  stampLabel: string;
+  /** Windows "Fore" colour: text, outlines, pen, underline. */
+  foreColor: string;
+  /** Windows "Back" colour: fill of new shapes (null = no fill). */
+  backColor: string | null;
+  strokeWidth: number;
+  /** Select tool: picked content objects ("t12"/"i30") and annotations (obj #). */
+  picked: { page: number; objects: string[]; annots: number[] } | null;
+  /** Pending input for a placed annotation (note/text box/link/stamp/sign). */
+  pendingInput: PendingInput | null;
+  /** Image waiting to be placed by the Image tool. */
+  pendingImage: PendingImage | null;
 }
+
+export interface PendingImage {
+  /** "jpeg" (original bytes) or "rgba" (decoded pixels). */
+  format: "jpeg" | "rgba";
+  b64: string;
+  width: number;
+  height: number;
+  name: string;
+}
+
+export type Tool =
+  | "highlight"
+  | "underline"
+  | "strikeout"
+  | "note"
+  | "textbox"
+  | "rect"
+  | "oval"
+  | "line"
+  | "arrow"
+  | "pen"
+  | "stamp"
+  | "link"
+  | "redact"
+  | "select"
+  | "shape-rect"
+  | "shape-oval"
+  | "shape-line"
+  | "shape-arrow"
+  | "sign"
+  | "image";
+
+export interface PendingInput {
+  kind: "note" | "textbox" | "link" | "sign";
+  page: number;
+  /** PDF user-space rect (or point as a zero-size rect). */
+  rect: [number, number, number, number];
+}
+
+export type RibbonTabName = "Document" | "Pages" | "Annotate" | "Content" | "Zoom" | "Navigate" | "Security";
+export const RIBBON_TABS: RibbonTabName[] = ["Document", "Pages", "Annotate", "Content", "Zoom", "Navigate", "Security"];
+
+export type Dialog =
+  | null
+  | "about"
+  | "extract"
+  | "split"
+  | "new"
+  | "addPage"
+  | "watermark"
+  | "encrypt"
+  | "attachments"
+  | "exportImages"
+  | "print"
+  | "help"
+  | "sign"
+  | "recolor"
+  | "font";
 
 let state: AppState = {
   doc: null,
   currentPage: 1,
   zoom: 1,
-  zoomMode: "fit-page",
+  // Documents open fit-to-width, as in the Windows build.
+  zoomMode: "fit-width",
   viewMode: "continuous",
   busy: false,
   lastError: null,
@@ -77,7 +197,27 @@ let state: AppState = {
   viewport: { width: 0, height: 0 },
   searchHits: [],
   searchIndex: -1,
+  scrollSeq: 0,
+  dialog: null,
+  selection: [],
+  savedLen: 0,
+  query: "",
+  ribbonTab: "Document",
+  tool: null,
+  stampLabel: "Approved",
+  foreColor: "#d0021b",
+  backColor: null,
+  strokeWidth: 2,
+  picked: null,
+  pendingInput: null,
+  pendingImage: null,
 };
+
+/** "#rrggbb" → [r, g, b] in 0..1. */
+export function rgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
 
 const listeners = new Set<() => void>();
 
@@ -114,7 +254,7 @@ async function refreshPages(doc: Document): Promise<Document> {
 
 /** Re-serialize the mutated document so the renderer rebinds to it. */
 async function withFreshBytes(doc: Document): Promise<Document> {
-  if (doc.passwordRequired || doc.encrypted) return doc;
+  if (doc.passwordRequired) return doc;
   try {
     const rb = await cmdRenderBytes();
     return { ...doc, bytesB64: rb.bytes_b64 };
@@ -157,13 +297,23 @@ export const store = {
       set({
         doc,
         currentPage: 1,
+        zoomMode: "fit-width",
+        scrollSeq: state.scrollSeq + 1,
+        selection: [],
+        savedLen: 0,
         editMode: false,
         selectionText: "",
+        searchHits: [],
+        searchIndex: -1,
         unlockOpen: doc.passwordRequired,
         statusMessage: doc.passwordRequired
           ? "This document is password-protected"
           : `Opened ${doc.pages.length} pages`,
       });
+      const w = doc.warnings.filter((x) => !/password-protected/.test(x));
+      if (!doc.passwordRequired && w.length) {
+        notify(`⚠ ${w.length} warning${w.length > 1 ? "s" : ""}: ${w[0]}`);
+      }
     } catch (e) {
       set({ lastError: e as Error, statusMessage: "Open failed" });
     } finally {
@@ -183,6 +333,7 @@ export const store = {
         selectionText: "",
         statusMessage: `Unlocked ${doc.pages.length} pages`,
       });
+      notify("Unlocked — copies you save will not be password-protected");
       return true;
     } catch (e) {
       set({ lastError: e as Error, statusMessage: "Unlock failed" });
@@ -192,23 +343,343 @@ export const store = {
     }
   },
 
+  /** Start a new blank document (Letter, A4, ...). */
+  async newDocument(widthPt: number, heightPt: number) {
+    return this.adopt(() => cmdNew(widthPt, heightPt), "New document");
+  },
+
+  /** Combine several PDFs into a new untitled document. */
+  async combine(paths: string[]) {
+    return this.adopt(() => cmdCombine(paths), `Combined ${paths.length} files`);
+  },
+
+  /** Replace the open document with one the backend just built. */
+  async adopt(make: () => Promise<Parameters<typeof documentFromOpen>[0]>, msg: string) {
+    set({ busy: true, lastError: null });
+    try {
+      const doc = documentFromOpen(await make());
+      set({
+        doc,
+        currentPage: 1,
+        zoomMode: "fit-width",
+        scrollSeq: state.scrollSeq + 1,
+        selection: [],
+        savedLen: 0,
+        editMode: false,
+        searchHits: [],
+        searchIndex: -1,
+        statusMessage: msg,
+      });
+      return true;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Failed" });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /** True when there are changes since the last save/open. */
+  isDirty(): boolean {
+    const d = state.doc;
+    return !!d && (d.history.length !== state.savedLen || (isUntitled(d) && d.history.length > 0));
+  },
+
+  /** Save in place (atomic). Untitled documents return false → use Save As. */
+  async save(): Promise<boolean> {
+    const doc = state.doc;
+    if (!doc || doc.passwordRequired) return false;
+    if (isUntitled(doc)) return false;
+    set({ busy: true, lastError: null });
+    try {
+      const res = await cmdSave();
+      set({
+        savedLen: doc.history.length,
+        lastCommit: { target: res.published_path, sha: res.new_sha256, size: res.size_bytes },
+        statusMessage: `Saved ${docName(doc)}`,
+      });
+      notify(`Saved ${docName(doc)}`);
+      return true;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Save failed" });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /** After Save As, the new file becomes the document (later Saves go there). */
+  async adoptSavedPath(path: string) {
+    const doc = state.doc;
+    if (!doc) return;
+    try {
+      const next = documentFromOpen(await cmdAdoptPath(path));
+      set({
+        doc: { ...next, bookmarks: doc.bookmarks, history: doc.history, redo: doc.redo },
+        savedLen: doc.history.length,
+      });
+    } catch (e) {
+      set({ lastError: e as Error });
+    }
+  },
+
+  /** Text watermark on all (or the given) pages. */
+  async watermark(spec: { text: string; size: number; placement: string; opacity: number; color: number[]; pages?: number[] }) {
+    const doc = state.doc;
+    if (!doc) return false;
+    return this.command(
+      { kind: "watermark", before: doc.pages.map((p) => p.page_no), data: spec },
+      () => cmdWatermark(spec),
+      () => ({ status: `Watermark added to ${spec.pages?.length || doc.pages.length} page(s)` }),
+    );
+  },
+
+  /** Set crop boxes `[page, x0, y0, x1, y1]` (PDF user space). */
+  async crop(boxes: number[][]) {
+    const doc = state.doc;
+    if (!doc || boxes.length === 0) return false;
+    return this.command(
+      { kind: "crop", before: doc.pages.map((p) => p.page_no), data: boxes },
+      () => cmdSetCrop(boxes),
+      () => ({ status: `Cropped ${boxes.length} page(s)` }),
+    );
+  },
+
+  /** Import (append) another PDF and jump to its first page. */
+  async importPdf(path: string) {
+    const before = state.doc?.pages.length ?? 0;
+    const ok = await this.merge(path);
+    if (ok) this.goToPage(before + 1);
+    return ok;
+  },
+
+  /** Pages the page commands act on: the sidebar selection or the current page. */
+  targets(): number[] {
+    return state.selection.length ? state.selection : [state.currentPage];
+  },
+
+  setPageSelection(pages: number[]) {
+    set({ selection: pages });
+  },
+
+  selectAllPages() {
+    const doc = state.doc;
+    if (doc) set({ selection: doc.pages.map((p) => p.page_no) });
+  },
+
+  setRibbonTab(tab: RibbonTabName) {
+    set({ ribbonTab: tab });
+  },
+
+  // ---- Find
+  /** Typing a new search term drops the old matches (Enter searches again). */
+  setQuery(q: string) {
+    if (q === state.query) return;
+    set({ query: q, searchHits: [], searchIndex: -1 });
+  },
+
+  async find(q = state.query): Promise<number> {
+    const session = state.session;
+    const doc = state.doc;
+    if (!doc || !session || !q.trim()) return 0;
+    const hits = await searchText(session, q.trim(), {}, [1, doc.pages.length]);
+    // Start from the first hit at or after the current page.
+    const start = Math.max(0, hits.findIndex((h) => h.page_no >= state.currentPage));
+    set({ query: q, searchHits: hits, searchIndex: hits.length ? start : -1 });
+    if (hits.length) this.goToPage(hits[start].page_no);
+    else notify(`No matches for “${q.trim()}”`);
+    return hits.length;
+  },
+
+  /** F3 / ⇧F3: next / previous match, wrapping around. */
+  async findNext(step: 1 | -1 = 1) {
+    if (!state.searchHits.length) {
+      if (state.query) await this.find();
+      return;
+    }
+    const n = (state.searchIndex + step + state.searchHits.length) % state.searchHits.length;
+    set({ searchIndex: n });
+    this.goToPage(state.searchHits[n].page_no);
+  },
+
+  // ---- tools & annotations
+  /** Arm a tool (same tool again = disarm). Leaving clears the selection. */
+  setTool(tool: Tool | null) {
+    const next = state.tool === tool ? null : tool;
+    set({ tool: next, picked: null, editMode: false, pendingInput: null });
+    if (next === "select") notify("Select: click an object or drag a box · drag to move · ⌫ deletes");
+  },
+
+  setStampLabel(label: string) {
+    set({ stampLabel: label });
+  },
+
+  setColors(c: { fore?: string; back?: string | null; width?: number }) {
+    set({
+      foreColor: c.fore ?? state.foreColor,
+      backColor: c.back === undefined ? state.backColor : c.back,
+      strokeWidth: c.width ?? state.strokeWidth,
+    });
+  },
+
+  setPicked(picked: AppState["picked"]) {
+    set({ picked });
+  },
+
+  setPendingInput(p: PendingInput | null) {
+    set({ pendingInput: p });
+  },
+
+  /** Arm the Image tool with a decoded image. */
+  armImage(img: PendingImage) {
+    set({ pendingImage: img, tool: "image", picked: null, editMode: false });
+    notify(`Click or drag on the page to place ${img.name}`);
+  },
+
+  async placeImage(page: number, rect: number[]) {
+    const img = state.pendingImage;
+    const doc = state.doc;
+    if (!img || !doc) return false;
+    const ok = await this.command(
+      { kind: "object", before: doc.pages.map((p) => p.page_no), data: { image: img.name } },
+      () => cmdInsertImage(page, rect, { format: img.format, b64: img.b64, width: img.width, height: img.height }),
+      () => ({ status: `Inserted image ${img.name} on page ${page}`, page }),
+    );
+    set({ tool: null, pendingImage: null });
+    return ok;
+  },
+
+  /** Fill a form field (text/choice: string; checkbox: boolean; radio: option). */
+  async setField(name: string, value: string | boolean) {
+    const doc = state.doc;
+    if (!doc) return false;
+    return this.command(
+      { kind: "object", before: doc.pages.map((p) => p.page_no), data: { name, value } },
+      () => cmdSetField(name, value),
+      () => ({ status: `Filled “${name}”` }),
+    );
+  },
+
+  /** Add an annotation (spec as in stitchup_core::annots::AnnotSpec). */
+  async annotate(page: number, spec: { kind: string } & Record<string, unknown>) {
+    const doc = state.doc;
+    if (!doc) return false;
+    return this.command(
+      { kind: "annotate", before: doc.pages.map((p) => p.page_no), data: spec },
+      () => cmdAddAnnotation(page, spec),
+      () => ({ status: `Added ${spec.kind.replace("_", " ")} on page ${page}`, page }),
+    );
+  },
+
+  async redact(page: number, rect: number[]) {
+    const doc = state.doc;
+    if (!doc) return false;
+    let msg = "Redacted";
+    return this.command(
+      { kind: "redact", before: doc.pages.map((p) => p.page_no), data: rect },
+      async () => {
+        const r = await cmdRedact(page, rect);
+        const rep = r.report;
+        const parts = [];
+        if (rep.glyphs_removed) parts.push(`${rep.glyphs_removed} characters`);
+        if (rep.images_removed) parts.push(`${rep.images_removed} image${rep.images_removed > 1 ? "s" : ""}`);
+        if (rep.annotations_removed) parts.push(`${rep.annotations_removed} annotation${rep.annotations_removed > 1 ? "s" : ""}`);
+        msg = `Redacted: removed ${parts.length ? parts.join(", ") : "nothing under the box (area blacked out)"}`;
+        if (rep.images_covered) msg += ` · ${rep.images_covered} image(s) partly under the box were covered, not removed`;
+        notify(msg);
+        return r;
+      },
+      () => ({ status: msg, page }),
+    );
+  },
+
+  /** Delete what the Select tool picked (content objects and annotations). */
+  async deletePicked(): Promise<boolean> {
+    const p = state.picked;
+    const doc = state.doc;
+    if (!p || !doc || (!p.objects.length && !p.annots.length)) return false;
+    const ok = await this.command(
+      { kind: "object", before: doc.pages.map((x) => x.page_no), data: p },
+      async () => {
+        if (p.objects.length) await cmdObjectOp(p.page, { op: "delete", ids: p.objects });
+        // Annotation numbers are stable across deletes (they are object ids).
+        for (const a of p.annots) await cmdDeleteAnnotation(p.page, a);
+      },
+      () => ({ status: `Deleted ${p.objects.length + p.annots.length} object(s)`, page: p.page }),
+    );
+    set({ picked: null });
+    return ok;
+  },
+
+  /** Move picked objects/annotations by (dx, dy) PDF points. */
+  async movePicked(dx: number, dy: number): Promise<boolean> {
+    const p = state.picked;
+    const doc = state.doc;
+    if (!p || !doc) return false;
+    const ok = await this.command(
+      { kind: "object", before: doc.pages.map((x) => x.page_no), data: { ...p, dx, dy } },
+      async () => {
+        if (p.objects.length) await cmdObjectOp(p.page, { op: "move", ids: p.objects, dx, dy });
+        for (const a of p.annots) await cmdMoveAnnotation(p.page, a, dx, dy);
+      },
+      () => ({ status: `Moved ${p.objects.length + p.annots.length} object(s)`, page: p.page }),
+    );
+    set({ picked: null });
+    return ok;
+  },
+
+  async objectOp(data: { op: "recolor" | "font"; color?: number[]; family?: string; size?: number }) {
+    const p = state.picked;
+    const doc = state.doc;
+    if (!p || !doc || !p.objects.length) {
+      notify("Select text first (Content ▸ Select, then click a line)");
+      return false;
+    }
+    const ok = await this.command(
+      { kind: "object", before: doc.pages.map((x) => x.page_no), data },
+      () => cmdObjectOp(p.page, { ...data, ids: p.objects }),
+      () => ({ status: data.op === "recolor" ? "Recoloured" : "Font changed", page: p.page }),
+    );
+    set({ picked: null });
+    return ok;
+  },
+
+  async insertShape(page: number, spec: Record<string, unknown>) {
+    const doc = state.doc;
+    if (!doc) return false;
+    return this.command(
+      { kind: "object", before: doc.pages.map((p) => p.page_no), data: spec },
+      () => cmdInsertShape(page, spec),
+      () => ({ status: `Inserted ${spec.kind} on page ${page}`, page }),
+    );
+  },
+
   setUnlockOpen(open: boolean) {
     set({ unlockOpen: open });
   },
 
   /** Run a PageTreeAdapter mutation and record its Operation. */
-  async command(op: Operation, mutation: (doc: Document) => Promise<unknown>): Promise<boolean> {
+  async command(
+    op: Operation,
+    mutation: (doc: Document) => Promise<unknown>,
+    after?: (result: unknown) => { status?: string; page?: number },
+  ): Promise<boolean> {
     set({ busy: true, lastError: null });
     try {
       const doc = state.doc;
       if (!doc) throw new Error("no document open");
-      await mutation(doc);
+      const result = await mutation(doc);
       let next = await refreshPages(doc);
       next = await withFreshBytes(next);
+      const extra = after?.(result) ?? {};
       set({
         doc: { ...next, history: [...next.history, op], redo: [] },
-        currentPage: clampPage(next, state.currentPage),
-        statusMessage: `Applied ${op.kind}`,
+        currentPage: clampPage(next, extra.page ?? state.currentPage),
+        // Text/page positions changed: stale search boxes would mislead.
+        searchHits: [],
+        searchIndex: -1,
+        selection: [],
+        statusMessage: extra.status ?? `Applied ${LABEL[op.kind] ?? op.kind}`,
       });
       return true;
     } catch (e) {
@@ -250,24 +721,48 @@ export const store = {
     );
   },
 
-  async insertBlank(afterPage: number, widthPt: number, heightPt: number) {
+  /**
+   * Insert a blank page after `afterPage` (0 = at the start). The size
+   * defaults to that page as displayed (rotation-swapped), so a blank page
+   * inserted into an A5 landscape document is A5 landscape too (A-c14).
+   */
+  async insertBlank(afterPage: number, widthPt?: number, heightPt?: number) {
     const doc = state.doc;
     if (!doc) return false;
+    const ref = doc.pages.find((p) => p.page_no === Math.max(1, afterPage)) ?? doc.pages[0];
+    const swap = ref ? ((ref.rotation % 180) + 180) % 180 === 90 : false;
+    const w = widthPt ?? (ref ? (swap ? ref.height_pt : ref.width_pt) : 612);
+    const h = heightPt ?? (ref ? (swap ? ref.width_pt : ref.height_pt) : 792);
     const before = doc.pages.map((p) => p.page_no);
     return this.command(
-      { kind: "insert_blank", before, data: { after: afterPage, width_pt: widthPt, height_pt: heightPt } },
-      () => pageTreeAdapter.insertBlank(doc, afterPage, widthPt, heightPt),
+      { kind: "insert_blank", before, data: { after: afterPage, width_pt: w, height_pt: h } },
+      () => pageTreeAdapter.insertBlank(doc, afterPage, w, h),
+      () => ({ status: `Inserted a blank page after page ${afterPage}`, page: afterPage + 1 }),
     );
   },
 
-  async editText(params: TextEditParams) {
+  /** Live in-place text edit (see stitchup_core::textedit). */
+  async editText(params: InPlaceEdit): Promise<EditResult | null> {
     const doc = state.doc;
-    if (!doc || doc.passwordRequired || doc.encrypted) return false;
+    if (!doc || doc.passwordRequired) return null;
     const before = doc.pages.map((p) => p.page_no);
-    return this.command(
+    let res: EditResult | null = null;
+    const ok = await this.command(
       { kind: "edit_text", before, data: params },
-      () => pageTreeAdapter.editText(doc, params),
+      async () => (res = await cmdEditText(params)),
+      () => {
+        const r = res as EditResult | null;
+        const msg =
+          r?.method === "in_place"
+            ? `Text edited (${r.note})`
+            : r
+              ? `Text edited — ${r.note}`
+              : "Text edited";
+        notify(msg);
+        return { status: msg };
+      },
     );
+    return ok ? res : null;
   },
 
   /** Append another PDF's pages to this document (A-c15). */
@@ -281,12 +776,38 @@ export const store = {
     );
   },
 
-  async extract(pages: number[]) {
-    const out = await pageTreeAdapter.extract(
-      state.doc!,
-      pages,
-    );
-    return out;
+  /** Save `pages` (1-based) as a new PDF; the open document is unchanged. */
+  async exportPages(pages: number[], target: string): Promise<CommitResult | null> {
+    set({ busy: true, lastError: null });
+    try {
+      const res = await cmdExportPages(pages, target, true);
+      const msg = `Saved ${pages.length} page${pages.length === 1 ? "" : "s"} to ${res.published_path}`;
+      set({ statusMessage: msg });
+      notify(msg);
+      return res;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Extract failed" });
+      return null;
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  /** Split into files of `every` pages inside `dir`. */
+  async split(every: number, dir: string, stem: string): Promise<CommitResult[] | null> {
+    set({ busy: true, lastError: null });
+    try {
+      const res = await cmdSplit(every, dir, stem, false);
+      const msg = `Split into ${res.length} files in ${dir}`;
+      set({ statusMessage: msg });
+      notify(msg);
+      return res;
+    } catch (e) {
+      set({ lastError: e as Error, statusMessage: "Split failed" });
+      return null;
+    } finally {
+      set({ busy: false });
+    }
   },
 
   /** Undo the last structural mutation — exact restore (A-c8). */
@@ -302,7 +823,9 @@ export const store = {
       set({
         doc: { ...next, history: doc.history.slice(0, -1), redo: [...doc.redo, op] },
         currentPage: clampPage(next, state.currentPage),
-        statusMessage: `Undid ${op.kind}`,
+        searchHits: [],
+        searchIndex: -1,
+        statusMessage: `Undid ${LABEL[op.kind] ?? op.kind}`,
       });
       return true;
     } catch (e) {
@@ -326,7 +849,9 @@ export const store = {
       set({
         doc: { ...next, history: [...doc.history, op], redo: doc.redo.slice(0, -1) },
         currentPage: clampPage(next, state.currentPage),
-        statusMessage: `Redid ${op.kind}`,
+        searchHits: [],
+        searchIndex: -1,
+        statusMessage: `Redid ${LABEL[op.kind] ?? op.kind}`,
       });
       return true;
     } catch (e) {
@@ -347,6 +872,7 @@ export const store = {
         lastCommit: { target: res.published_path, sha: res.new_sha256, size: res.size_bytes },
         statusMessage: `Saved to ${res.published_path}`,
       });
+      notify(`Saved to ${res.published_path}`);
       return res;
     } catch (e) {
       set({ lastError: e as Error, statusMessage: "Save failed" });
@@ -356,9 +882,9 @@ export const store = {
     }
   },
 
-  async updateMetadata(updates: Parameters<typeof metadataAdapter.set>[1]) {
+  async updateMetadata(updates: Parameters<typeof metadataAdapter.set>[1]): Promise<boolean> {
     const doc = state.doc;
-    if (!doc) return;
+    if (!doc) return false;
     set({ busy: true, lastError: null });
     try {
       const prev = doc.metadata;
@@ -377,8 +903,10 @@ export const store = {
         },
         statusMessage: "Metadata updated",
       });
+      return true;
     } catch (e) {
       set({ lastError: e as Error, statusMessage: "Metadata update failed" });
+      return false;
     } finally {
       set({ busy: false });
     }
@@ -487,11 +1015,23 @@ export const store = {
     set({ doc: next, statusMessage: "All bookmarks removed" });
   },
 
+  /** Jump to page `n` and scroll it into view. */
   goToPage(n: number) {
     const doc = state.doc;
     if (!doc || n < 1 || n > doc.pages.length) return;
-    set({ currentPage: n });
+    set({ currentPage: n, scrollSeq: state.scrollSeq + 1 });
   },
+
+  /** The viewer reports the page under the viewport centre while scrolling. */
+  setCurrentFromScroll(n: number) {
+    if (n !== state.currentPage) set({ currentPage: n });
+  },
+
+  setDialog(dialog: AppState["dialog"]) {
+    set({ dialog });
+  },
+
+  notify,
 
   setMetadataOpen(open: boolean) {
     set({ metadataOpen: open });
@@ -552,6 +1092,22 @@ export const store = {
 };
 
 /** Keyboard shortcut map (accessibility, A-c list). */
+/** Friendly names for operations in status messages. */
+const LABEL: Partial<Record<Operation["kind"], string>> = {
+  reorder: "page reorder",
+  rotate: "rotation",
+  delete: "page delete",
+  insert_blank: "blank page",
+  edit_text: "text edit",
+  set_metadata: "properties edit",
+  merge: "merge",
+  watermark: "watermark",
+  crop: "crop",
+  annotate: "annotation",
+  redact: "redaction",
+  object: "object edit",
+};
+
 export const SHORTCUTS = {
   open: "meta+o",
   saveAs: "meta+shift+s",

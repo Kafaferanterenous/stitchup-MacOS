@@ -21,6 +21,15 @@ pub struct Snapshot {
     pub pages: Vec<(u32, Object)>,
     /// Cloned `/Info` dictionary (or its inline object), if the trailer has one.
     pub info: Option<Object>,
+    /// Any other objects an op declared it touches (form fields, the
+    /// catalog…): their full state, or None when the object didn't exist.
+    pub extra: Vec<((u32, u16), Option<Object>)>,
+}
+
+/// Add the current state of `ids` to a snapshot.
+pub fn with_extra(mut snap: Snapshot, doc: &PdfDoc, ids: &[(u32, u16)]) -> Snapshot {
+    snap.extra = ids.iter().map(|id| (*id, doc.objects.get(id).cloned())).collect();
+    snap
 }
 
 /// One logged mutation with enough state to replay or fully revert it.
@@ -86,7 +95,7 @@ pub fn snapshot(doc: &PdfDoc) -> Result<Snapshot, EngineError> {
         Err(_) => None,
     };
 
-    Ok(Snapshot { kids, pages, info })
+    Ok(Snapshot { kids, pages, info, extra: Vec::new() })
 }
 
 /// Apply one side of a record to the document (full replacement semantics).
@@ -109,6 +118,17 @@ pub fn apply(doc: &mut PdfDoc, rec: &OpRecord, use_before: bool) -> Result<(), E
 
     for (id, obj) in snap.pages.iter() {
         doc.objects.insert((*id, 0), obj.clone());
+    }
+
+    for (id, obj) in snap.extra.iter() {
+        match obj {
+            Some(o) => {
+                doc.objects.insert(*id, o.clone());
+            }
+            None => {
+                doc.objects.remove(id);
+            }
+        }
     }
 
     let info_ref = doc.trailer.get(b"Info").ok().and_then(|o| o.as_reference().ok());

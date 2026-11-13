@@ -1,452 +1,193 @@
-//! The Stitchup ribbon: a tab strip over groups of related controls, the way a
-//! document app's chrome is organised (tabs -> labelled groups -> controls).
-//! Independently designed for Stitchup; every control dispatches to the store.
+//! The Stitchup ribbon — same layout as the Windows build: a brand accent
+//! strip, the tab strip (Document · Pages · Annotate · Content · Zoom ·
+//! Navigate · Security) and one card of icon-over-caption buttons. Every
+//! button comes from the command registry (src/commands.ts).
 
-import { useEffect, useState, type ReactNode } from "react";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { useAppState, store } from "../../store";
-import { applyTheme, currentTheme, THEMES, type ThemeName } from "../../themes/theme";
-import { Icon, type IconName } from "./icons";
+import { useEffect, useRef, useState } from "react";
+import { useAppState, store, RIBBON_TABS } from "../../store";
+import { COMMANDS, runCommand, type Command } from "../../commands";
+import { Icon } from "./icons";
 
-type TabId = "File" | "Home" | "Pages" | "Insert" | "View";
+function RibbonButton({ cmd }: { cmd: Command }) {
+  const app = useAppState();
+  const [open, setOpen] = useState(false);
+  const colorRef = useRef<HTMLInputElement | null>(null);
+  const enabled = !app.busy && (!cmd.enabled || cmd.enabled(app));
+  const active = cmd.active?.(app) ?? false;
+  const dirty = cmd.id === "save" && store.isDirty();
 
-const TABS: TabId[] = ["File", "Home", "Pages", "Insert", "View"];
+  // Menu bar / shortcut asked to show this button's drop-down or colour picker.
+  useEffect(() => {
+    const onChoices = (e: Event) => (e as CustomEvent).detail === cmd.id && setOpen(true);
+    const onSwatch = (e: Event) => cmd.swatch && (e as CustomEvent).detail === cmd.swatch && cmd.tab === app.ribbonTab && colorRef.current?.click();
+    window.addEventListener("stitchup-choices", onChoices);
+    window.addEventListener("stitchup-swatch", onSwatch);
+    return () => {
+      window.removeEventListener("stitchup-choices", onChoices);
+      window.removeEventListener("stitchup-swatch", onSwatch);
+    };
+  }, [cmd.id, cmd.swatch, cmd.tab, app.ribbonTab]);
 
-const SHORT_THEME: Record<ThemeName, string> = { xp: "Classic", dark: "Dark", blue: "Blue" };
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      setOpen(false);
+    };
+    const t = setTimeout(() => window.addEventListener("mousedown", close), 0);
+    window.addEventListener("keydown", close);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [open]);
 
-/** A labelled group of controls, with a divider to its right. */
-function Group({ label, children }: { label: string; children: ReactNode }) {
+  const swatchColor = cmd.swatch === "fore" ? app.foreColor : cmd.swatch === "back" ? app.backColor : null;
+
   return (
-    <section className="ribbon-group" aria-label={label}>
-      <div className="ribbon-group-items">{children}</div>
-      <div className="ribbon-group-label">{label}</div>
-    </section>
+    <span className="rb-wrap">
+      <button
+        type="button"
+        className={`rb-btn${active ? " active" : ""}${dirty ? " dirty" : ""}${cmd.choices ? " has-choices" : ""}`}
+        onClick={() => {
+          if (cmd.choices) setOpen((o) => !o);
+          else if (cmd.swatch) colorRef.current?.click();
+          else void runCommand(cmd.id);
+        }}
+        onContextMenu={(e) => {
+          if (cmd.swatch === "back") {
+            e.preventDefault();
+            store.setColors({ back: null });
+            store.notify("Back colour: no fill");
+          }
+        }}
+        disabled={!enabled}
+        aria-pressed={cmd.active ? active : undefined}
+        aria-haspopup={cmd.choices ? "menu" : undefined}
+        aria-expanded={cmd.choices ? open : undefined}
+        data-cmd={cmd.id}
+        title={dirty ? `${cmd.tip} — unsaved changes` : cmd.tip}>
+        <span className="rb-icon">
+          {cmd.swatch ? (
+            <span className={`rb-swatch${swatchColor ? "" : " none"}`} style={{ background: swatchColor ?? undefined }} />
+          ) : (
+            <Icon name={cmd.icon} size={20} />
+          )}
+        </span>
+        <span className="rb-text">
+          {cmd.label}
+          {cmd.choices ? " ▾" : ""}
+        </span>
+      </button>
+      {cmd.swatch && (
+        <input
+          ref={colorRef}
+          type="color"
+          className="rb-color-input"
+          aria-label={`${cmd.label} colour`}
+          value={swatchColor ?? "#ffffff"}
+          onChange={(e) => store.setColors(cmd.swatch === "fore" ? { fore: e.target.value } : { back: e.target.value })}
+        />
+      )}
+      {open && cmd.choices && (
+        <div className="rb-choices" role="menu" onMouseDown={(e) => e.stopPropagation()}>
+          {cmd.choices().map((c) => (
+            <button
+              key={c.label}
+              role="menuitem"
+              className={c.active ? "active" : ""}
+              onClick={() => {
+                setOpen(false);
+                c.run();
+              }}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 
-interface BtnProps {
-  icon: IconName;
-  label?: string;
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  title?: string;
+/** Page box for the Navigate tab: type a number, Enter. */
+function PageBox() {
+  const app = useAppState();
+  const [v, setV] = useState("");
+  const count = app.doc?.pages.length ?? 0;
+  function go() {
+    const n = Number(v);
+    if (Number.isInteger(n) && n >= 1 && n <= count) {
+      store.goToPage(n);
+      setV("");
+    } else store.notify(`Enter a page number from 1 to ${count}`);
+  }
+  return (
+    <div className="rb-pagebox">
+      <input aria-label="Go to page" inputMode="numeric" placeholder={`${app.currentPage}`} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} disabled={!count} />
+      <span>/ {count || "—"}</span>
+      <button type="button" className="rb-go" onClick={go} disabled={!count || !v.trim()}>
+        Go
+      </button>
+    </div>
+  );
 }
 
-/** A large control: 24 px icon above a label. */
-function Big({ icon, label, onClick, disabled, active, title }: BtnProps) {
+/** Find box on the tab row (⌘F focuses it; Enter / F3 / ⇧F3 step through). */
+function SearchBox() {
+  const app = useAppState();
+  const hits = app.searchHits.length;
   return (
-    <button
-      type="button"
-      className={`rb-big${active ? " active" : ""}`}
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      title={title ?? label}>
-      <span className="rb-icon">
-        <Icon name={icon} size={24} />
+    <div className="search-box" role="search">
+      <Icon name="find" size={14} />
+      <input
+        value={app.query}
+        placeholder="Find"
+        aria-label="Find text"
+        disabled={!app.doc}
+        onChange={(e) => store.setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void (hits && app.query ? store.findNext(e.shiftKey ? -1 : 1) : store.find());
+          if (e.key === "Escape") store.setQuery("");
+        }}
+      />
+      <span className="search-status" aria-live="polite">
+        {hits ? `${app.searchIndex + 1}/${hits}` : ""}
       </span>
-      {label && <span className="rb-text">{label}</span>}
-    </button>
-  );
-}
-
-/** A compact control: 16 px icon beside an optional label. */
-function Small({ icon, label, onClick, disabled, active, title }: BtnProps) {
-  return (
-    <button
-      type="button"
-      className={`rb-small${active ? " active" : ""}`}
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      title={title ?? label}>
-      <Icon name={icon} size={16} />
-      {label && <span className="rb-text">{label}</span>}
-    </button>
+      <button type="button" aria-label="Previous match" onClick={() => void store.findNext(-1)} disabled={!hits}>
+        ‹
+      </button>
+      <button type="button" aria-label="Next match" onClick={() => void store.findNext(1)} disabled={!hits}>
+        ›
+      </button>
+    </div>
   );
 }
 
 export function Ribbon() {
   const app = useAppState();
-  const [tab, setTab] = useState<TabId>("Home");
-  const [backstage, setBackstage] = useState(false);
-  const [goTo, setGoTo] = useState("");
-  const [theme, setTheme] = useState<ThemeName>(currentTheme());
-
-  const doc = app.doc;
-  const busy = app.busy;
-  const pageCount = doc?.pages.length ?? 0;
-  const locked = !doc || doc.passwordRequired;
-  const editable = !!doc && !doc.passwordRequired && !doc.encrypted;
-  const canUndo = !locked && !busy && (doc?.history.length ?? 0) > 0;
-  const canRedo = !locked && !busy && (doc?.redo.length ?? 0) > 0;
-  const onPage = app.currentPage;
-
-  useEffect(() => {
-    if (!backstage) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setBackstage(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [backstage]);
-
-  async function pickAndOpen() {
-    const chosen = await openDialog({
-      multiple: false,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (typeof chosen === "string") {
-      setBackstage(false);
-      await store.open(chosen);
-    }
-  }
-
-  async function saveAs() {
-    const picked = await saveDialog({
-      defaultPath: doc ? `stitchup-export-from-${doc.sourceHash.slice(0, 8)}.pdf` : undefined,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (typeof picked === "string") {
-      try {
-        await store.commit(picked, false);
-        setBackstage(false);
-      } catch {
-        // Surfaced through app.lastError / the status bar.
-      }
-    }
-  }
-
-  function chooseTheme(name: ThemeName) {
-    setTheme(name);
-    void applyTheme(name);
-  }
-
-  function selectTab(id: TabId) {
-    if (id === "File") {
-      setBackstage((open) => !open);
-      return;
-    }
-    setBackstage(false);
-    setTab(id);
-  }
-
-  function submitGoTo() {
-    const n = Number(goTo);
-    if (Number.isInteger(n) && n >= 1 && n <= pageCount) {
-      store.goToPage(n);
-      setGoTo("");
-    }
-  }
-
+  const tab = app.ribbonTab;
+  const buttons = COMMANDS.filter((c) => c.tab === tab);
   return (
     <header className="ribbon" aria-label="ribbon toolbar">
+      <div className="ribbon-strip" />
       <div className="ribbon-tabs" role="tablist" aria-label="Ribbon tabs">
-        {TABS.map((id) => {
-          const selected = id === "File" ? backstage : !backstage && tab === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              className={`ribbon-tab${selected ? " active" : ""}${id === "File" ? " file" : ""}`}
-              onClick={() => selectTab(id)}>
-              {id}
-            </button>
-          );
-        })}
-        <div className="ribbon-qat" aria-label="Quick access">
-          <Small icon="open" onClick={pickAndOpen} disabled={busy} title="Open a PDF (⌘O)" />
-          <Small icon="save" onClick={saveAs} disabled={locked || busy} title="Save As… (⌘⇧S)" />
-          <span className="qat-sep" />
-          <Small
-            icon="undo"
-            onClick={() => void store.undo()}
-            disabled={!canUndo}
-            title="Undo (⌘Z)"
-          />
-          <Small
-            icon="redo"
-            onClick={() => void store.redo()}
-            disabled={!canRedo}
-            title="Redo (⌘⇧Z)"
-          />
+        {RIBBON_TABS.map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={t === tab} className={`ribbon-tab${t === tab ? " active" : ""}`} onClick={() => store.setRibbonTab(t)}>
+            {t}
+          </button>
+        ))}
+        <SearchBox />
+      </div>
+      <div className="ribbon-body" role="tabpanel" aria-label={tab}>
+        <div className="ribbon-card">
+          {buttons.map((c) => (
+            <RibbonButton key={c.id} cmd={c} />
+          ))}
+          {tab === "Navigate" && <PageBox />}
+          {tab === "Zoom" && <span className="ribbon-readout">{Math.round(app.zoom * 100)}%</span>}
         </div>
       </div>
-
-      {backstage ? (
-        <div className="ribbon-backstage">
-          <nav className="backstage-nav" aria-label="File commands">
-            <button type="button" className="backstage-item" onClick={pickAndOpen} disabled={busy}>
-              <Icon name="open" size={20} /> Open…
-            </button>
-            <button
-              type="button"
-              className="backstage-item"
-              onClick={saveAs}
-              disabled={locked || busy}>
-              <Icon name="save" size={20} /> Save As…
-            </button>
-            <button
-              type="button"
-              className="backstage-item"
-              onClick={() => {
-                store.setMetadataOpen(true);
-                setBackstage(false);
-              }}
-              disabled={!doc}>
-              <Icon name="info" size={20} /> Document Properties…
-            </button>
-            <div className="backstage-sep" />
-            <button
-              type="button"
-              className="backstage-item"
-              onClick={() => void store.exitApp()}
-              title="Quit Stitchup (⌘Q)">
-              <Icon name="exit" size={20} /> Exit
-            </button>
-          </nav>
-          <div className="backstage-side">
-            <h3>Stitchup</h3>
-            <p className="muted">Offline-first PDF viewer &amp; editor</p>
-            {doc && (
-              <p className="muted" title={doc.path}>
-                {pageCount} page{pageCount === 1 ? "" : "s"} · opened from source
-              </p>
-            )}
-            <label className="backstage-field">
-              <span>Theme</span>
-              <select
-                aria-label="Theme"
-                value={theme}
-                onChange={(e) => chooseTheme(e.target.value as ThemeName)}>
-                {THEMES.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      ) : (
-        <div className="ribbon-body" role="tabpanel">
-          {tab === "Home" && (
-            <>
-              <Group label="Clipboard">
-                <Big
-                  icon="copy"
-                  label="Copy"
-                  onClick={() => void store.copySelection()}
-                  disabled={locked || busy || app.selectionText.length === 0}
-                  title="Copy the selected text to the clipboard (⌘C)"
-                />
-              </Group>
-              <Group label="File">
-                <Big icon="open" label="Open" onClick={pickAndOpen} disabled={busy} title="Open a PDF (⌘O)" />
-                <Big
-                  icon="save"
-                  label="Save As"
-                  onClick={saveAs}
-                  disabled={locked || busy}
-                  title="Atomic save-as to a new file (⌘⇧S)"
-                />
-              </Group>
-              <Group label="History">
-                <Big icon="undo" label="Undo" onClick={() => void store.undo()} disabled={!canUndo} title="Undo the last change (⌘Z)" />
-                <Big icon="redo" label="Redo" onClick={() => void store.redo()} disabled={!canRedo} title="Redo (⌘⇧Z)" />
-              </Group>
-              <Group label="Page">
-                <div className="rb-grid">
-                  <Small icon="rotate-cw" label="Rotate CW" onClick={() => void store.rotate([onPage], true)} disabled={locked || busy} title="Rotate this page 90° clockwise" />
-                  <Small icon="rotate-ccw" label="Rotate CCW" onClick={() => void store.rotate([onPage], false)} disabled={locked || busy} title="Rotate this page 90° counter-clockwise" />
-                  <Small icon="trash" label="Delete" onClick={() => void store.deletePages([onPage])} disabled={locked || busy} title="Delete this page" />
-                  <Small icon="insert-blank" label="Blank page" onClick={() => void store.insertBlank(onPage, 612, 792)} disabled={locked || busy} title="Insert a US-Letter blank page after this one" />
-                </div>
-              </Group>
-              <Group label="Edit">
-                <Big
-                  icon="text"
-                  label="Edit Text"
-                  active={app.editMode}
-                  onClick={() => store.setEditMode(!app.editMode)}
-                  disabled={!editable || busy}
-                  title="Click a text line in the page to replace it"
-                />
-              </Group>
-            </>
-          )}
-
-          {tab === "Pages" && (
-            <>
-              <Group label="Organise">
-                <Big icon="rotate-cw" label="Rotate CW" onClick={() => void store.rotate([onPage], true)} disabled={locked || busy} title="Rotate the current page clockwise" />
-                <Big icon="rotate-ccw" label="Rotate CCW" onClick={() => void store.rotate([onPage], false)} disabled={locked || busy} title="Rotate the current page counter-clockwise" />
-                <Big icon="insert-blank" label="Insert Blank" onClick={() => void store.insertBlank(onPage, 612, 792)} disabled={locked || busy} title="Insert a blank page after the current page" />
-                <Big icon="trash" label="Delete" onClick={() => void store.deletePages([onPage])} disabled={locked || busy} title="Delete the current page" />
-              </Group>
-              <Group label="Navigate">
-                <div className="rb-nav">
-                  <Small
-                    icon="prev"
-                    onClick={() => store.goToPage(onPage - 1)}
-                    disabled={locked || onPage <= 1}
-                    title="Previous page"
-                  />
-                  <input
-                    className="rb-page"
-                    inputMode="numeric"
-                    aria-label="Go to page"
-                    placeholder={`${onPage}`}
-                    value={goTo}
-                    onChange={(e) => setGoTo(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && submitGoTo()}
-                    disabled={locked}
-                  />
-                  <span className="rb-muted">/ {pageCount || "—"}</span>
-                  <Small
-                    icon="next"
-                    onClick={() => store.goToPage(onPage + 1)}
-                    disabled={locked || onPage >= pageCount}
-                    title="Next page"
-                  />
-                </div>
-                <Small
-                  icon="text"
-                  label="Go"
-                  onClick={submitGoTo}
-                  disabled={locked || goTo.trim() === ""}
-                  title="Jump to the typed page number"
-                />
-              </Group>
-              <Group label="Bookmarks">
-                <Big
-                  icon="bookmark-add"
-                  label="Add"
-                  onClick={() => void store.addBookmark()}
-                  disabled={locked}
-                  title={`Bookmark page ${onPage}`}
-                />
-                <Big
-                  icon="trash"
-                  label="Clear All"
-                  onClick={() => void store.clearBookmarks()}
-                  disabled={locked || (doc?.bookmarks.length ?? 0) === 0}
-                  title="Remove every bookmark (current session only)"
-                />
-              </Group>
-            </>
-          )}
-
-          {tab === "Insert" && (
-            <>
-              <Group label="Pages">
-                <Big icon="insert-blank" label="Blank Page" onClick={() => void store.insertBlank(onPage, 612, 792)} disabled={locked || busy} title="Insert a blank page after the current page" />
-                <Big icon="merge" label="Merge PDF" onClick={() => void pickAndMerge()} disabled={locked || busy} title="Append the pages of another PDF" />
-              </Group>
-              <Group label="Text">
-                <Big
-                  icon="text"
-                  label="Edit Text"
-                  active={app.editMode}
-                  onClick={() => store.setEditMode(!app.editMode)}
-                  disabled={!editable || busy}
-                  title="Click a text line in the page to replace it"
-                />
-              </Group>
-              <Group label="Properties">
-                <Big icon="info" label="Document" onClick={() => store.setMetadataOpen(true)} disabled={!doc} title="Title, author, subject, keywords" />
-              </Group>
-            </>
-          )}
-
-          {tab === "View" && (
-            <>
-              <Group label="Views">
-                <Big
-                  icon="single"
-                  label="Single"
-                  active={app.viewMode === "single"}
-                  onClick={() => store.setViewMode("single")}
-                  disabled={!doc}
-                />
-                <Big
-                  icon="spread"
-                  label="Spread"
-                  active={app.viewMode === "spread"}
-                  onClick={() => store.setViewMode("spread")}
-                  disabled={!doc}
-                />
-                <Big
-                  icon="continuous"
-                  label="Continuous"
-                  active={app.viewMode === "continuous"}
-                  onClick={() => store.setViewMode("continuous")}
-                  disabled={!doc}
-                />
-              </Group>
-              <Group label="Zoom">
-                <div className="rb-grid">
-                  <Small icon="zoom-out" label="Zoom −" onClick={() => store.setZoom(Math.max(0.25, app.zoom - 0.1), "custom")} disabled={!doc} />
-                  <Small icon="zoom-in" label="Zoom +" onClick={() => store.setZoom(Math.min(5, app.zoom + 0.1), "custom")} disabled={!doc} />
-                  <Small icon="fit-page" label="Fit page" onClick={() => store.setFitMode("fit-page")} disabled={!doc} active={app.zoomMode === "fit-page"} />
-                  <Small icon="fit-width" label="Fit width" onClick={() => store.setFitMode("fit-width")} disabled={!doc} active={app.zoomMode === "fit-width"} />
-                  <Small icon="actual" label="Actual (1:1)" onClick={() => store.setZoom(1, "actual")} disabled={!doc} active={app.zoomMode === "actual"} />
-                </div>
-                <span className="ribbon-readout">{Math.round(app.zoom * 100)}%</span>
-              </Group>
-              <Group label="Show">
-                <Small
-                  icon="sidebar"
-                  label={app.paneOpen ? "Hide Sidebar" : "Show Sidebar"}
-                  active={app.paneOpen}
-                  onClick={() => store.setPaneOpen(!app.paneOpen)}
-                  disabled={!doc}
-                  title="Toggle the sidebar (⌘⇧P)"
-                />
-                <Small
-                  icon="thumbnails"
-                  label="Thumbnails"
-                  active={app.paneOpen && app.paneTab === "pages"}
-                  onClick={() => store.setPaneTab("pages")}
-                  disabled={!doc}
-                />
-                <Small
-                  icon="bookmark"
-                  label="Bookmarks"
-                  active={app.paneOpen && app.paneTab === "bookmarks"}
-                  onClick={() => store.setPaneTab("bookmarks")}
-                  disabled={!doc}
-                />
-              </Group>
-              <Group label="Theme">
-                {(Object.keys(SHORT_THEME) as ThemeName[]).map((name) => (
-                  <Big
-                    key={name}
-                    icon="palette"
-                    label={SHORT_THEME[name]}
-                    active={theme === name}
-                    onClick={() => chooseTheme(name)}
-                    title={`${SHORT_THEME[name]} theme`}
-                  />
-                ))}
-              </Group>
-            </>
-          )}
-        </div>
-      )}
     </header>
   );
-
-  async function pickAndMerge() {
-    const chosen = await openDialog({
-      multiple: false,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (typeof chosen === "string") {
-      await store.merge(chosen);
-    }
-  }
 }

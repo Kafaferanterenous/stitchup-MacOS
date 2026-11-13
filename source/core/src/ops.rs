@@ -65,10 +65,16 @@ pub fn open_bytes(bytes: Vec<u8>, path: PathBuf) -> Result<OpenInfo, EngineError
         if let Ok(id) = cat_ref.as_reference() {
             if let Ok(cat) = doc.get_object(id) {
                 if let Ok(d) = cat.as_dict() {
+                    // AcroForm is usually an indirect object: follow the reference.
+                    let deref = |o: &Object| match o {
+                        Object::Reference(r) => doc.get_object(*r).ok().cloned(),
+                        o => Some(o.clone()),
+                    };
                     if d.get(b"AcroForm")
                         .ok()
-                        .and_then(|o| o.as_dict().ok())
-                        .and_then(|f| f.get(b"XFA").ok())
+                        .and_then(deref)
+                        .and_then(|o| o.as_dict().ok().cloned())
+                        .and_then(|f| f.get(b"XFA").ok().cloned())
                         .is_some()
                     {
                         warnings.push("document contains an XFA form (view disabled, read-only)".into());
@@ -134,8 +140,48 @@ fn set_kids(doc: &mut PdfDoc, pages_id: u32, kids: &[(u32, u16)], count: u32) ->
     Ok(())
 }
 
-fn pages_struct(doc: &PdfDoc) -> Result<(u32, Vec<(u32, u16)>), EngineError> {
+fn pages_struct(doc: &mut PdfDoc) -> Result<(u32, Vec<(u32, u16)>), EngineError> {
+    flatten_page_tree(doc)?;
     pages_node(doc)
+}
+
+/// Make every page a direct kid of the root `/Pages` node, copying inherited
+/// attributes (Resources, MediaBox, CropBox, Rotate) into each page first so
+/// nothing changes visually. Structural ops (reorder/delete/insert/merge) work
+/// on a flat `/Kids` list; real-world PDFs often nest pages in groups.
+/// Returns true when the tree was changed.
+pub fn flatten_page_tree(doc: &mut PdfDoc) -> Result<bool, EngineError> {
+    let (root, kids) = pages_node(doc)?;
+    let is_page = |doc: &PdfDoc, id: (u32, u16)| {
+        doc.get_object(id)
+            .ok()
+            .and_then(|o| o.as_dict().ok())
+            .and_then(|d| d.get(b"Type").ok())
+            .and_then(|t| t.as_name().ok())
+            == Some(&b"Page"[..])
+    };
+    if kids.iter().all(|&k| is_page(doc, k)) {
+        return Ok(false);
+    }
+    let leaves: Vec<(u32, u16)> = doc.get_pages().into_values().collect();
+    for &id in &leaves {
+        let mut copied = Vec::new();
+        for key in [&b"Resources"[..], b"MediaBox", b"CropBox", b"Rotate"] {
+            let own = doc.get_object(id)?.as_dict()?.has(key);
+            if !own {
+                if let Some(v) = crate::model::inherited(doc, id, key) {
+                    copied.push((key.to_vec(), v.clone()));
+                }
+            }
+        }
+        let d = doc.get_object_mut(id)?.as_dict_mut()?;
+        for (k, v) in copied {
+            d.set(k, v);
+        }
+        d.set("Parent", Object::Reference((root, 0)));
+    }
+    set_kids(doc, root, &leaves, leaves.len() as u32)?;
+    Ok(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +227,10 @@ pub fn rotate_pages(doc: &mut PdfDoc, page_nos: &[u32], cw: bool) -> Result<Vec<
         let &id = pages_map
             .get(&n)
             .ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "no page {n}"))?;
-        let page = doc.get_object(id)?;
-        let cur = crate::model::page_rotation(page);
+        let cur = crate::model::inherited(doc, id, b"Rotate")
+            .and_then(|o| o.as_i64().ok())
+            .unwrap_or(0)
+            .rem_euclid(360);
         let delta = if cw { 90 } else { -90 };
         let next = (cur + delta).rem_euclid(360);
         if let Some(d) = doc.objects.get_mut(&id).and_then(|o| o.as_dict_mut().ok()) {
@@ -239,12 +287,18 @@ pub fn insert_blank(doc: &mut PdfDoc, after: u32, width_pt: f64, height_pt: f64)
 
 /// Extract pages (1-based) into a fresh in-memory document (orphan-safe copy).
 pub fn extract(doc: &PdfDoc, page_nos: &[u32]) -> Result<PdfDoc, EngineError> {
+    if page_nos.is_empty() {
+        return Err(crate::err!(ErrorCode::ValidationFailed, "no pages to extract"));
+    }
     let mut out = PdfDoc::with_version(doc.version.as_str());
     out.trailer = doc.trailer.clone();
+    out.trailer.remove(b"Encrypt");
+    out.max_id = doc.max_id;
     for (old_id, obj) in doc.objects.iter() {
         out.objects.insert(*old_id, obj.clone());
     }
-    let pages_map = doc.get_pages();
+    flatten_page_tree(&mut out)?;
+    let pages_map = out.get_pages();
     let mut kids: Vec<(u32, u16)> = Vec::new();
     for &n in page_nos {
         let &id = pages_map
@@ -267,7 +321,30 @@ pub fn extract(doc: &PdfDoc, page_nos: &[u32]) -> Result<PdfDoc, EngineError> {
     let dict = node.as_dict_mut()?;
     dict.set("Kids", Object::Array(kids.iter().map(|&r| Object::Reference(r)).collect()));
     dict.set("Count", Object::Integer(kids.len() as i64));
+    // Outlines/named destinations may point at dropped pages; drop them rather
+    // than ship dangling links, then discard everything no longer referenced.
+    if let Ok(root_id) = out.trailer.get(b"Root").and_then(Object::as_reference) {
+        if let Ok(cat) = out.get_object_mut(root_id).and_then(Object::as_dict_mut) {
+            for k in [&b"Outlines"[..], b"Dests", b"OpenAction", b"PageLabels", b"StructTreeRoot"] {
+                cat.remove(k);
+            }
+        }
+    }
+    out.prune_objects();
+    out.renumber_objects();
     Ok(out)
+}
+
+/// Split into chunks of `every` pages (the last chunk may be shorter).
+pub fn split(doc: &PdfDoc, every: u32) -> Result<Vec<PdfDoc>, EngineError> {
+    let n = doc.get_pages().len() as u32;
+    if every == 0 || every >= n {
+        return Err(crate::err!(ErrorCode::ValidationFailed, "split size must be 1..{}", n.saturating_sub(1)));
+    }
+    (1..=n)
+        .step_by(every as usize)
+        .map(|start| extract(doc, &(start..=(start + every - 1).min(n)).collect::<Vec<_>>()))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +403,9 @@ pub fn merge_doc(doc: &mut PdfDoc, other: &PdfDoc) -> Result<Vec<PageMeta>, Engi
         ));
     }
     let (pages_id, mut kids) = pages_struct(doc)?;
+    let mut other = other.clone();
+    flatten_page_tree(&mut other)?;
+    let other = &other;
 
     let mut map: std::collections::HashMap<(u32, u16), (u32, u16)> = std::collections::HashMap::new();
     let old_ids: Vec<(u32, u16)> = other.objects.keys().copied().collect();
@@ -377,7 +457,9 @@ pub fn set_metadata(doc: &mut PdfDoc, meta: &Metadata) -> Result<(), EngineError
     macro_rules! set_opt {
         ($key:literal, $field:expr) => {
             if let Some(s) = $field {
-                dict.set($key, Object::string_literal(s.clone()));
+                // ASCII stays a plain literal; anything else is written as
+                // UTF-16BE with BOM so every reader decodes it correctly.
+                dict.set($key, lopdf::text_string(s));
             }
         };
     }

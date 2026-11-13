@@ -1,6 +1,6 @@
 [package]
 name = "stitchup"
-version = "0.1.0"
+version = "0.5.0"
 description = "Stitchup — clean-room, offline-first PDF editor (Tauri 2 host for stitchup-core)"
 license = "MIT OR Apache-2.0"
 edition = "2021"

@@ -1,26 +1,58 @@
-//! Theme loader. Default (xp) is statically imported in main.tsx; switching
-//! imports the target sheet dynamically (later-in-DOM wins at equal specificity
-//! since every theme defines the same tokens on `:root`).
+//! Colour schemes (the nine from the Windows build, see schemes.css). Each
+//! scopes its tokens to `:root[data-theme="<name>"]` (Light Grey is the bare `:root`
+//! default), so switching is just setting the attribute — in any order. The
+//! choice is remembered per machine (best effort).
 
-export type ThemeName = "xp" | "dark" | "blue";
+export type ThemeName =
+  | "light-grey"
+  | "dark-blue"
+  | "darker-navy"
+  | "blue"
+  | "pastel"
+  | "hc-dark"
+  | "hc-light"
+  | "pastel-2"
+  | "pastel-3";
 
-export const THEMES: { name: ThemeName; label: string }[] = [
-  { name: "xp", label: "Classic (XP)" },
-  { name: "dark", label: "Dark" },
-  { name: "blue", label: "Blue" },
+export const THEMES: { name: ThemeName; label: string; dark: boolean }[] = [
+  { name: "light-grey", label: "Light Grey", dark: false },
+  { name: "dark-blue", label: "Dark Blue", dark: true },
+  { name: "darker-navy", label: "Darker Navy", dark: true },
+  { name: "blue", label: "Blue", dark: false },
+  { name: "pastel", label: "Pastel", dark: false },
+  { name: "hc-dark", label: "High Contrast (Dark)", dark: true },
+  { name: "hc-light", label: "High Contrast (Light)", dark: false },
+  { name: "pastel-2", label: "Pastel 2", dark: false },
+  { name: "pastel-3", label: "Pastel 3", dark: false },
 ];
 
-const loaders: Record<ThemeName, () => Promise<unknown>> = {
-  xp: () => import("../themes/xp.css"),
-  dark: () => import("../themes/dark.css"),
-  blue: () => import("../themes/blue.css"),
-};
+const KEY = "stitchup.theme";
 
 export async function applyTheme(name: ThemeName): Promise<void> {
-  await loaders[name]();
   document.documentElement.dataset.theme = name;
+  try {
+    localStorage.setItem(KEY, name);
+  } catch {
+    /* storage unavailable: theme just isn't remembered */
+  }
 }
 
 export function currentTheme(): ThemeName {
-  return (document.documentElement.dataset.theme as ThemeName) ?? "xp";
+  return (document.documentElement.dataset.theme as ThemeName) ?? "light-grey";
+}
+
+/** ⌘D (as Ctrl+D on Windows): flip between Light Grey and Dark Blue. */
+export function toggleDark(): Promise<void> {
+  return applyTheme(currentTheme() === "dark-blue" ? "light-grey" : "dark-blue");
+}
+
+/** Re-apply the remembered theme at startup. */
+export async function restoreTheme(): Promise<void> {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(KEY);
+  } catch {
+    saved = null;
+  }
+  if (saved && THEMES.some((t) => t.name === saved)) await applyTheme(saved as ThemeName);
 }

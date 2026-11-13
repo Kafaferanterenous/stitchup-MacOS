@@ -898,3 +898,108 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
 - Harness currently 16/16; build green; dist is current (fit + search in it).
 - Reminder: never commit windows_version/. Leave source/core/fixtures/ and the
   stray "Screenshot 2026-10-21 at 2.38.24 PM.png" untracked.
+
+2026-11-12 — TAKEOVER BY CLAUDE CODE (v0.2.5): audit, bug fixes, true in-place text edit
+- Repo restored from git HEAD 02eceff (the USB working copy had lost 79/90 files).
+- AUDIT FINDINGS (all fixed, all covered by tests):
+  * Text runs used pdf.js transform[0] (font size) as the WIDTH -> selection boxes,
+    search highlights and the edit white-patch were ~1 font-size wide.
+  * Nested page trees (most real PDFs): pages inheriting MediaBox failed to OPEN
+    ("no usable box"); delete removed a whole page GROUP; reorder failed; merge lost
+    inherited Resources. Fix: inheritance-aware collect_pages + flatten_page_tree
+    (at open, outside the op log) + flattened merge source.
+  * Save As could never replace an existing file (overwrite=false after the OS panel
+    already confirmed). Now overwrite=true from the dialog; source path still refused.
+  * Unlocked encrypted PDFs: /Encrypt survived decryption, so render refresh and
+    saved copies were unreadable. /Encrypt is dropped on unlock (copy is unprotected;
+    the UI says so). Editing is now allowed after unlock.
+  * Continuous view never tracked/scrolled to the current page (Rotate/Delete acted
+    on page 1 while viewing page 5). Scroll sync + scroll-into-view added.
+  * Opening a doc could land on page 2 (old scroll position).
+  * Thumbnail order mirror went stale after the first drag (broken thumbs after delete/undo).
+  * Themes: dynamically-imported :root sheets meant the LAST loaded theme always won
+    (Classic could not be restored after Dark). Sheets now scoped by data-theme.
+  * Metadata: UTF-16 titles decoded as garbage/blank; non-ASCII written as raw UTF-8;
+    form kept stale values between docs; fields could not be cleared.
+  * XFA warning never fired (AcroForm reference not followed).
+  * ⌘O used window.prompt; ⌘⇧S / ⌘2 unhandled; shortcuts fired while typing.
+  * Every edit re-bound pdf.js with session=null -> viewer flashed and lost scroll.
+- NEW: core/src/textedit.rs — true in-place edit: content stream interpreted (CTM,
+  text state, Tj/TJ/'/"), run located by decoded text + position (whole ops or a
+  substring), re-encoded in the ORIGINAL font when it can (subset glyph check), else
+  original glyphs removed and the new text drawn at the same text matrix in the
+  closest standard-14 family (sans/serif/mono, bold/italic). White-patch overlay only
+  as last resort. New stream object per edit; undo-safe. Empty text deletes the line.
+- NEW UI: Edit Text mode = click a line; editor matches size/family, grows, Enter /
+  click-away saves, Tab / Shift+Tab next/previous line, Esc cancels; keeps the new
+  text until re-render. Extract… / Split… (Pages tab + sidebar ⇪), sidebar
+  multi-select (⌘/Shift-click), insert-blank = current page size, warnings badge,
+  Document Properties (file facts + warnings), About & Licenses, High-contrast theme
+  (remembered), PageUp/PageDown in single view. CommitPanel/MetadataModal removed.
+- TESTS: core 24 (new tests/textedit.rs 9; dbg_esave.rs removed: hard-coded VM path),
+  command layer 9, NEW e2e 42/42 (tests/ui/e2e.mjs: real dist/ + real Rust session via
+  src-tauri/examples/dev_bridge.rs; includes Apple's 310-page Keynote License.pdf with
+  a nested tree: delete + in-place edit in HelveticaNeue-Bold). tests/ui/acceptance.mjs
+  (stubbed backend, double-click edit) retired.
+- BUILD: ./build-macos.sh -> dist/Stitchup.app universal, ad-hoc signed, system libs only.
+
+2026-11-13 — v0.3.0: WINDOWS PARITY, BATCH 1 (look + document features)
+- Studied github.com/Kafaferanterenous/stitchup-Win v0.12.28 (Win32/PDFium, app.cpp):
+  menus, ribbon tabs/buttons/tooltips, 9 colour schemes (palette extracted from kThemes).
+- UI now matches Windows: ribbon tabs Document·Pages·Annotate·Content·Zoom·Navigate·Security
+  with the Windows button sets/labels/tooltips (src/commands.ts = single registry for
+  ribbon, native macOS menu bar (src/menu.ts, verified in the real app: "native menu
+  installed (10 menus, 65 commands)") and shortcuts); themes/schemes.css generated from
+  the Windows palette; Windows status bar; red Save when dirty; "No document open" hint;
+  documents open Fit Width. Find box on the tab row (⌘F, Enter, F3/⇧F3, ⌘G).
+- NEW backend (core/src/docops.rs + commands): New blank doc (untitled sessions), Save in
+  place (atomic; refuses if the file changed on disk; re-encrypts a protected file with its
+  own password), Save As adopts the new path, Combine into New, Watermark (center/top/tiled,
+  rotation-aware, opacity), crop boxes (Auto-Crop from an ink scan), AES-256 Save As
+  Encrypted, Compress, Attachments list/save, write_file for exports, print_window,
+  Finder/Dock/argv open (RunEvent::Opened + file association), log_message.
+- NEW frontend: exports Text/CSV/RTF/DOCX/ODT (hand-built STORE zip, src/export.ts) and
+  page images PNG/JPEG; Print dialog with live sheet preview (same fit maths as the
+  printout) → macOS print panel; dialogs New/Add Page/Watermark/Encrypt/Attachments/
+  Export Images/Print/User Guide; drag & drop open; Import jumps to the imported pages.
+- E2: standard-14 fallback now encodes Central European letters via /Differences glyph
+  names (ą ć ę ł ń ó ś ź ż …) instead of '?'.
+- Annotate + Content-object buttons are shown (Windows layout) but say "coming soon (goal X)".
+- TESTS: core 32 (docops 6 new, textedit 11), command layer 9, e2e 49/49 (rewritten for the
+  new UI; exports verified with pdf.js + Python zipfile).
+
+2026-11-13 — v0.3.1: user report "could not double-click or right-click text to edit". Added
+  double-click-any-line editing (no mode needed, as on Windows) and a right-click context menu
+  (Edit Text, Copy, Copy Line, Find, Edit Text Mode, rotate/add/extract/delete page). e2e 52/52.
+
+2026-11-13 — v0.4.0: ALL RIBBON TABS LIVE (user: "Annotate greyed out, Content only Edit Text works,
+  zoom stretches vertically, add × to sidebar, make Sign work")
+- ZOOM BUG: .page-view had max-width:100% → width capped while height followed zoom (vertical
+  stretch); centred flex also clipped the left edge. Pages now never constrained; scroll sideways.
+- Sidebar header × close.
+- core/src/annots.rs: Highlight/Underline/StrikeOut (quads snapped to text), Note, FreeText (wrapped),
+  Square/Circle/Line(+arrow)/Ink, Stamp (12 presets + custom), Link (URI or page Dest) — every one
+  with an /AP appearance; move = shifted clone under a new id, delete = drop from inline /Annots.
+- core/src/objects.rs: list/move/delete text runs + images (positional ids), recolour, font change
+  (std-14 + Polish), vector shapes into content, TRUE redaction (glyphs under the box replaced by
+  exact-advance TJ kerning so nothing shifts; whole images removed; annotations removed).
+- core/src/std14.rs: built-in Adobe Core14 widths — PDFs using Helvetica/Times/Courier without
+  /Widths were measured with a flat 500 width (bad redaction/move/edit positions).
+- core/src/sign.rs: self-signed RSA-2048 X.509 + detached CMS SHA-256 (RustCrypto), fixed
+  placeholders patched in place, visible appearance; verified with system OpenSSL (+ tamper test).
+- Frontend: PageOverlay (tools, select/marquee/move, link follow, note popup; ignores clicks while
+  the page re-renders after an edit — real race found by e2e), ribbon drop-downs (Shape, Stamp),
+  Fore/Back swatches, dialogs (note/text box/link input, Sign, Recolour, Font).
+- TESTS: core 46 (annots_objects 5, sign 2 new), command layer 9, e2e 64/64 (every Annotate and
+  Content tool, link follow, redaction, signature verified by OpenSSL, "every button live").
+
+2026-11-13 — v0.5.0: FORMS + INSERT IMAGE + README SCREENSHOTS + GITHUB
+- core/src/forms.rs: list fields (qualified names, inherited FT/Ff/DA/Opt, widget pages), set
+  text/choice/checkbox/radio; regenerates widget appearances (auto-fit like a viewer — pdf-lib
+  writes fixed DA sizes such as 69pt), creates check-mark appearances when missing. Verified with
+  pdf-lib (independent reader) and Apple PDFKit (qlmanage render).
+- oplog: Snapshot.extra — ops that modify objects in place (form fields) snapshot them for undo.
+- core/src/objects.rs insert_image: JPEG embedded as DCT (no recompression), RGBA → Flate + SMask.
+- UI: FormLayer (fields over widgets), Content ▸ Image tool, readable radio labels (/Opt).
+- tests/ui/readme-shots.mjs: README screenshots from the real UI + backend (demo PDF, own text).
+- TESTS: core 49, command layer 9, e2e 66/66.

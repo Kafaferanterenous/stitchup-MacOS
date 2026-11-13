@@ -3,7 +3,7 @@
 //! the Rust side rejects with `EngineError`; normalize anything else.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { EngineError, OpenResult, CommitResult, PageMeta, Metadata } from "./types";
+import type { EngineError, OpenResult, CommitResult, PageMeta, Metadata, InPlaceEdit, EditResult } from "./types";
 import { isEngineError } from "./types";
 
 async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
@@ -65,3 +65,84 @@ export async function cmdRenderBytes(): Promise<{ bytes_b64: string }> {
 export async function cmdQuit(): Promise<void> {
   return cmd<void>("quit_app");
 }
+/** Live in-place text edit; reports how the edit was applied. */
+export async function cmdEditText(data: InPlaceEdit): Promise<EditResult> {
+  return cmd<EditResult>("edit_text", { data });
+}
+
+/** Save the given pages (1-based) as a new PDF (atomic). */
+export async function cmdExportPages(pages: number[], target: string, overwrite: boolean): Promise<CommitResult> {
+  return cmd<CommitResult>("export_pages", { pages, target, overwrite });
+}
+
+/** Split into files of `every` pages: <dir>/<stem>-partN.pdf. */
+export async function cmdSplit(every: number, dir: string, stem: string, overwrite: boolean): Promise<CommitResult[]> {
+  return cmd<CommitResult[]>("split_document", { every, dir, stem, overwrite });
+}
+
+// ---- document-level commands
+export const cmdNew = (widthPt: number, heightPt: number) => cmd<OpenPayload>("new_document", { widthPt, heightPt });
+export const cmdSave = () => cmd<CommitResult>("save_document");
+export const cmdAdoptPath = (path: string) => cmd<OpenPayload>("adopt_saved_path", { path });
+export const cmdCombine = (paths: string[]) => cmd<OpenPayload>("combine_documents", { paths });
+export const cmdWatermark = (spec: unknown) => cmd<PageMeta[]>("add_watermark", { spec });
+export const cmdSetCrop = (boxes: number[][]) => cmd<PageMeta[]>("set_crop", { boxes });
+export const cmdSaveEncrypted = (target: string, userPassword: string, ownerPassword: string) =>
+  cmd<CommitResult>("save_encrypted", { target, userPassword, ownerPassword });
+export const cmdSaveCompressed = (target: string) =>
+  cmd<{ before: number; after: number; result: CommitResult }>("save_compressed", { target });
+export interface AttachmentInfo {
+  index: number;
+  name: string;
+  size: number;
+  mime: string;
+  description: string;
+}
+export const cmdListAttachments = () => cmd<AttachmentInfo[]>("list_attachments");
+export const cmdSaveAttachment = (index: number, target: string) => cmd<CommitResult>("save_attachment", { index, target });
+export const cmdWriteFile = (path: string, b64: string) => cmd<CommitResult>("write_file", { path, b64 });
+export const cmdTakePendingOpen = () => cmd<string[]>("take_pending_open");
+
+// ---- annotations, objects, redaction, signatures
+export const cmdAddAnnotation = (page: number, spec: unknown) => cmd<PageMeta[]>("add_annotation", { page, spec });
+export const cmdDeleteAnnotation = (page: number, obj: number) => cmd<PageMeta[]>("delete_annotation", { page, obj });
+export const cmdMoveAnnotation = (page: number, obj: number, dx: number, dy: number) => cmd<PageMeta[]>("move_annotation", { page, obj, dx, dy });
+export interface RedactReport {
+  glyphs_removed: number;
+  images_removed: number;
+  images_covered: number;
+  annotations_removed: number;
+}
+export const cmdRedact = (page: number, rect: number[]) => cmd<{ pages: PageMeta[]; report: RedactReport }>("redact_area", { page, rect });
+export interface PageObject {
+  id: string;
+  kind: "text" | "image" | "graphic";
+  text: string;
+  rect: [number, number, number, number];
+}
+export const cmdListObjects = (page: number) => cmd<PageObject[]>("list_objects", { page });
+export const cmdObjectOp = (page: number, data: unknown) => cmd<PageMeta[]>("object_op", { page, data });
+export const cmdInsertShape = (page: number, spec: unknown) => cmd<PageMeta[]>("insert_shape", { page, spec });
+export const cmdSign = (target: string, spec: unknown) => cmd<CommitResult>("sign_document", { target, spec });
+export const cmdOpenUrl = (url: string) => cmd<void>("open_url", { url });
+
+// ---- forms and images
+export interface FormWidget {
+  id: [number, number];
+  page: number;
+  rect: [number, number, number, number];
+  on_state: string | null;
+}
+export interface FormField {
+  name: string;
+  kind: "text" | "checkbox" | "radio" | "choice" | "button" | "signature";
+  value: string;
+  options: string[];
+  multiline: boolean;
+  readonly: boolean;
+  widgets: FormWidget[];
+}
+export const cmdListFields = () => cmd<FormField[]>("list_fields");
+export const cmdSetField = (name: string, value: string | boolean) => cmd<PageMeta[]>("set_field", { name, value });
+export const cmdInsertImage = (page: number, rect: number[], image: unknown) => cmd<PageMeta[]>("insert_image", { page, rect, image });
+export const cmdReadImage = (path: string) => cmd<{ b64: string }>("read_image_file", { path });

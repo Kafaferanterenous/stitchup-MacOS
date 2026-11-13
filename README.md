@@ -1,77 +1,87 @@
-# Stitchup — Project 007
+# Stitchup for macOS
 
-A fully featured, portable, offline-first, cross-platform PDF viewer/editor.
-Independently designed — inspired by the general workspace of common PDF
-applications (ribbon, thumbnail pane, canvas, properties pane, status bar), not
-a copy of any commercial product.
+An offline PDF viewer and editor for macOS (Apple Silicon and Intel). Same
+ribbon, menus and colour schemes as the Windows build
+([stitchup-Win](https://github.com/Kafaferanterenous/stitchup-Win)).
+Everything runs on your Mac. Nothing is uploaded, and your file is only
+replaced when you save.
 
-![Stitchup running on macOS — ribbon, page thumbnails, bookmarks and a PDF open in the viewer](docs/screenshot.png)
+![Annotate tab: highlight, underline, sticky note, shape and stamp on a document (Light Grey scheme)](docs/screenshots/annotate-light-grey.png)
 
-![Stitchup's main window in the XP theme — ribbon, page pane, canvas and status bar](docs/screenshot-window.png)
+| | |
+|---|---|
+| ![Double-click any line to edit it in place, in the document's own font (Blue scheme)](docs/screenshots/edit-text-blue.png) | ![Filling a PDF form: text field and checkbox (Dark Blue scheme)](docs/screenshots/forms-dark-blue.png) |
+| Double-click any line to rewrite it in the document's own font | Fill PDF forms; the values show in Preview and Acrobat too |
+| ![Print dialog with a live preview of each sheet (Pastel 3 scheme)](docs/screenshots/print-pastel-3.png) | ![Empty window with the ribbon tabs (Pastel scheme)](docs/screenshots/empty-pastel.png) |
+| Print preview with paper size and orientation | Nine colour schemes, the same as on Windows |
 
-Status: **Stage 0 (design contract) complete; Stage 1 built and running on
-macOS.** The Rust structural core (`source/core`) compiles, `cargo test` is
-green (core stage-1 acceptance + a headless Tauri session-layer suite in
-`source/app/src-tauri/tests/command_layer.rs`), and the fixture set
-(F-01..F-14, F-09 deferred) is generated + verified.
-The Tauri 2 + React app (`source/app`) builds and runs on this machine
-(`npm run tauri dev`), with viewer/search/zoom, page-tree structural ops
-(reorder/rotate/delete/insert/extract), metadata, atomic export, undo, themes,
-and a first content-level feature: **text editing** (click a text run &
-replace — white-patch + Helvetica overlay via the `edit_text` core op, then
-re-render from the serialized in-memory document). A prebuilt
-`Stitchup.app` is produced by `npm run tauri build` (ad-hoc signed; macOS
-notarization and the Windows/Linux builds remain open work — see the
-`AI_HANDOFF_*.txt` files).
+## Download
+
+Get the latest `Stitchup-macOS-universal-*.zip` from
+[Releases](https://github.com/Kafaferanterenous/stitchup-MacOS/releases),
+unzip it and drag **Stitchup.app** to Applications. The app is ad-hoc signed,
+not notarized. The first time you open it, right-click it and choose
+**Open**, or run `xattr -dr com.apple.quarantine Stitchup.app`.
+
+## What it does
+
+- **Edit text in place:** double-click a line, or use Content ▸ Edit Text. The
+  text is changed in the PDF in the original font. If that font lacks a letter,
+  the line is redrawn in the closest standard font, with full Polish and other
+  Central European letters (ą ć ę ł ń ó ś ź ż).
+- **Annotate:** highlight, underline and strike-out snap to the text. Also
+  sticky notes, text boxes, shapes (rectangle, oval, line, arrow), stamps,
+  links and freehand pen. All are real PDF annotations, so they look the same
+  in Preview and Acrobat.
+- **Redact:** what is under the box is removed from the file, not just covered.
+- **Content tools:** select, move and delete text, images and annotations.
+  Recolour text, change its font and size, insert images (PNG with
+  transparency, JPEG, HEIC…) and draw vector shapes.
+- **Forms:** fill text fields, checkboxes, radio buttons and drop-downs.
+- **Pages:** rotate, delete, add, drag to reorder, multi-select, extract,
+  split, merge, import, combine, and auto-crop.
+- **Security:** AES-256 password protection, watermarks, and digital signatures
+  (RSA-2048 / SHA-256 PKCS#7, verifiable with OpenSSL).
+- **Export:** Text, CSV, RTF, DOCX, ODT, and PNG or JPEG images. Print with
+  preview; "Save as PDF" is in the macOS print panel. Compress PDF.
+- **Navigation and viewing:** find (⌘F, F3), thumbnails, bookmarks, single,
+  spread and continuous views, zoom and fit, unlimited undo and redo, and
+  the nine Windows colour schemes. Open by double-clicking in Finder, by
+  dragging onto the window, or from the Dock.
+
+Progress against the Windows build: [GOALS.md](GOALS.md).
+
+## Build
+
+Requirements: Rust (stable), Node.js 20 or later, and the Xcode Command Line Tools.
+
+```sh
+./build-macos.sh           # all tests + universal app → dist/Stitchup.app and a zip
+./build-macos.sh --quick   # app only
+```
+
+Tests:
+
+| Command | What it checks |
+|---|---|
+| `cd source/core && cargo test --release` | PDF engine: text editing, annotations, redaction, forms, signatures (checked with OpenSSL), page tree |
+| `cd source/app/src-tauri && cargo test --release` | Command layer |
+| `cd source/app && npm run build && npm run test:e2e` | 66 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
 
 ## Layout
 
 ```
-007_2026_09_10_Stitchup/
-├── spec/                      # original Project 021 handoff + research (immutable)
-│   ├── prompt.txt
-│   ├── pdf_editor_ai_handoff_prompt.txt
-│   ├── RESEARCH_2026_08_20_PDF_EDITOR_ECOSYSTEM.md
-│   └── dev_notes.txt
-├── docs/
-│   ├── STAGE0_DOCUMENT_MODEL.md
-│   ├── STAGE0_ENGINE_INTERFACES.md
-│   ├── STAGE0_DEPENDENCY_LEDGER.md
-│   ├── STAGE0_FIXTURES_AND_ACCEPTANCE.md
-│   └── RESEARCH_2026_09_10_GITHUB_ECOSYSTEM.md
-├── AI_HANDOFF_WINDOWS.txt     # for the AI building the Windows packages
-├── AI_HANDOFF_LINUX.txt       # for the AI building the Linux packages
-├── fixtures/generated/        # sanitized fixture PDFs F-01..F-14 (F-09 deferred)
-├── scripts/
-│   ├── generate_fixtures.sh   # regenerate fixtures via the Rust core
-│   └── verify_fixtures.sh     # run the acceptance-subset assertions
-├── source/
-│   ├── core/                  # stitchup-core Rust crate (lopdf) — BUILDABLE
-│   └── app/                   # Tauri 2 + React/TS frontend + src-tauri host
-├── dev_notes.txt              # live multi-AI journal (append-only)
-└── NOTICES/                   # third-party license texts (created at build)
+source/core/            Rust PDF engine (lopdf): textedit, annots, objects (redaction),
+                        forms, sign, docops, ops (pages), oplog (undo/redo)
+source/app/             Tauri 2 + React/TypeScript UI (pdf.js renderer)
+  src/commands.ts       every ribbon button, menu item and shortcut, defined once
+  src-tauri/            commands; examples/dev_bridge.rs serves the e2e tests
+fixtures/generated/     test PDFs (F-01…F-14)
+docs/                   design notes, dependency ledger, screenshots
 ```
 
-## Read first
+## Licences
 
-1. `dev_notes.txt` (latest checkpoint)
-2. `spec/pdf_editor_ai_handoff_prompt.txt` (project rules + stages + legal)
-3. `docs/STAGE0_*.md` (model, interfaces, ledger, fixtures/acceptance)
-4. `AI_HANDOFF_WINDOWS.txt` / `AI_HANDOFF_LINUX.txt` for those builds
-
-## Ground rules (short version)
-
-- **Legal:** no copying PDF Gear, Nitro/Jumbl, Adobe, PDF.js viewer assets, or
-  any other project's code. Permissive deps only (MIT/Apache/MPL/BSD); AGPL,
-  GPL, MuPDF, Ghostscript and open-core code stay out of the default build.
-- **Data safety:** never overwrite the opened source; atomic temp+fsync+rename
-  save-as only.
-- **Stages:** 0 design (done) → 1 viewer/page-workspace → 2 overlays/forms →
-  3 redaction/signing/encryption → 4 OCR/compression/AI (gated).
-- **Journal:** every session appends to `dev_notes.txt`, never overwrites.
-
-## Theming
-
-Themes: XP-inspired (default), Dark, Blue — all with readable contrast for
-buttons/menus (WCAG spot-checked). Independently styled, not pixel-matching any
-commercial or retro-theme project's artwork.
+Built on Tauri, React, PDF.js, lopdf, dnd-kit and RustCrypto (all MIT or
+Apache-2.0). The list is under File ▸ About & Licenses and in
+`docs/STAGE0_DEPENDENCY_LEDGER.md`.

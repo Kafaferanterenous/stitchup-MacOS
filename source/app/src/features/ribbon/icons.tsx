@@ -31,7 +31,40 @@ export type IconName =
   | "sidebar"
   | "thumbnails"
   | "palette"
-  | "exit";
+  | "exit"
+  | "new"
+  | "save-as"
+  | "attachment"
+  | "import"
+  | "export-text"
+  | "csv"
+  | "image"
+  | "rtf"
+  | "docx"
+  | "odt"
+  | "print"
+  | "preview"
+  | "to-pdf"
+  | "compress"
+  | "extract"
+  | "split"
+  | "crop"
+  | "highlight"
+  | "underline"
+  | "note"
+  | "textbox"
+  | "shape"
+  | "stamp"
+  | "link"
+  | "redact"
+  | "pen"
+  | "select"
+  | "font"
+  | "watermark"
+  | "lock"
+  | "sign"
+  | "find"
+  | "strike";
 
 const ICONS: Record<IconName, ReactNode> = {
   open: (
@@ -193,6 +226,105 @@ const ICONS: Record<IconName, ReactNode> = {
       <path d="M17 8l4 4-4 4" />
       <path d="M21 12H10" />
     </>
+  ),
+  "new": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /></>
+  ),
+  "save-as": (
+    <><path d="M5 4h11l3 3v6" /><path d="M5 4v16h7" /><path d="M8 4v5h7V4" /><path d="M14.5 20.5l1-3.5 5-5 2.5 2.5-5 5z" /></>
+  ),
+  "attachment": (
+    <path d="M16.5 7.5l-7.8 7.8a2.2 2.2 0 0 0 3.1 3.1l8-8a4 4 0 0 0-5.7-5.7l-8.3 8.3a5.8 5.8 0 0 0 8.2 8.2l6-6" />
+  ),
+  "import": (
+    <><path d="M13 3h5l3 3v15H8v-5" /><path d="M3 11h11" /><path d="M10 7.5L13.5 11 10 14.5" /></>
+  ),
+  "export-text": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M9 11h6M9 14h6M9 17h4" /></>
+  ),
+  "csv": (
+    <><rect x="3.5" y="4" width="17" height="16" rx="1.5" /><path d="M3.5 9h17M3.5 14h17M9.5 4v16M15 4v16" /></>
+  ),
+  "image": (
+    <><rect x="3.5" y="4.5" width="17" height="15" rx="1.5" /><circle cx="9" cy="10" r="1.6" /><path d="M4 18l5-5 4 4 3-3 4 4" /></>
+  ),
+  "rtf": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M9 11h6M9 14h4M9 17h6" /><path d="M14 3v4h4" /></>
+  ),
+  "docx": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M8.5 11l1.2 6 1.6-4.5L13 17l1.4-6" /></>
+  ),
+  "odt": (
+    <><path d="M6 3h8l4 4v14H6z" /><circle cx="12" cy="14" r="3" /></>
+  ),
+  "print": (
+    <><path d="M7 9V3.5h10V9" /><rect x="3.5" y="9" width="17" height="8" rx="1.5" /><path d="M7 14h10v6.5H7z" /></>
+  ),
+  "preview": (
+    <><path d="M7 9V3.5h10V9" /><rect x="3.5" y="9" width="17" height="8" rx="1.5" /><circle cx="12" cy="17.5" r="3" /><path d="M14.2 19.7L16 21.5" /></>
+  ),
+  "to-pdf": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M9 17v-5h1.7a1.4 1.4 0 0 1 0 2.8H9" /><path d="M13.5 12v5" /></>
+  ),
+  "compress": (
+    <><path d="M6 3h12v18H6z" /><path d="M12 3v2M12 7v2M12 11v2" /><rect x="10.5" y="14" width="3" height="4" rx="0.8" /></>
+  ),
+  "extract": (
+    <><path d="M5 4h9v16H5z" /><path d="M12 12h9" /><path d="M18 8.5l3.5 3.5-3.5 3.5" /></>
+  ),
+  "split": (
+    <><path d="M4 4h7v16H4zM13 4h7v16h-7z" /><path d="M12 2v20" strokeDasharray="2 2" /></>
+  ),
+  "crop": (
+    <><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M2 6h14a2 2 0 0 1 2 2v14" /></>
+  ),
+  "highlight": (
+    <><path d="M5 20h14" /><path d="M8 16l-1.5 2.5h4L12 16" /><path d="M8 16l7-11 4 2.5-6 11z" /></>
+  ),
+  "underline": (
+    <><path d="M7 4v7a5 5 0 0 0 10 0V4" /><path d="M5 20h14" /></>
+  ),
+  "note": (
+    <><path d="M4 4h16v11l-5 5H4z" /><path d="M15 20v-5h5" /><path d="M8 9h8M8 12h5" /></>
+  ),
+  "textbox": (
+    <><rect x="3" y="5" width="18" height="14" rx="1.5" strokeDasharray="3 2" /><path d="M8.5 9h7M12 9v7" /></>
+  ),
+  "shape": (
+    <><rect x="3.5" y="10" width="10" height="10" rx="1" /><circle cx="16" cy="8" r="5" /></>
+  ),
+  "stamp": (
+    <><path d="M9 12V8.5a3 3 0 1 1 6 0V12" /><path d="M4 12h16v4H4z" /><path d="M5 20h14" /></>
+  ),
+  "link": (
+    <><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1" /><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" /></>
+  ),
+  "redact": (
+    <><rect x="3.5" y="5" width="17" height="14" rx="1.5" /><rect x="6.5" y="9" width="11" height="3" fill="currentColor" stroke="none" /><path d="M6.5 15.5h6" /></>
+  ),
+  "pen": (
+    <><path d="M14.5 4.5l5 5L9 20H4v-5z" /><path d="M12.5 6.5l5 5" /></>
+  ),
+  "select": (
+    <path d="M5 3l14 7.5-6 1.5-2.5 6.5z" />
+  ),
+  "font": (
+    <><path d="M4 19L9.5 5h1L16 19" /><path d="M6.5 14h7" /><path d="M17 19v-5.5a2.5 2.5 0 0 1 5 0V19M17 16h5" /></>
+  ),
+  "watermark": (
+    <><path d="M6 3h8l4 4v14H6z" /><path d="M8 17l8-8" strokeDasharray="2 1.6" /></>
+  ),
+  "lock": (
+    <><rect x="5" y="10.5" width="14" height="10" rx="1.5" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /><circle cx="12" cy="15.5" r="1.2" /></>
+  ),
+  "sign": (
+    <><path d="M3 18c3-1 4-5 6-5s1 4 3 4 3-3 4-3 1.5 2 5 2" /><path d="M3 21h18" /></>
+  ),
+  "find": (
+    <><circle cx="10.5" cy="10.5" r="6" /><path d="M15 15l5.5 5.5" /></>
+  ),
+  "strike": (
+    <><path d="M5 12h14" /><path d="M16 6.5A4 4 0 0 0 12 5c-2.5 0-4 1.3-4 3 0 1.6 1.2 2.5 3 3" /><path d="M8 17.5A4.5 4.5 0 0 0 12 19c2.6 0 4.2-1.4 4.2-3.2 0-.9-.3-1.6-.9-2.1" /></>
   ),
 };
 

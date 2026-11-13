@@ -13,7 +13,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { extractTo } from "../../actions";
+import { Icon } from "../ribbon/icons";
 import { useAppState, store } from "../../store";
 import { renderPage, type RenderSession } from "../../adapters/renderAdapter";
 
@@ -85,7 +87,15 @@ function PagePreview({
   );
 }
 
-function Thumb({ pageNo }: { pageNo: number }) {
+function Thumb({
+  pageNo,
+  picked,
+  onPick,
+}: {
+  pageNo: number;
+  picked: boolean;
+  onPick: (pageNo: number, e: MouseEvent) => void;
+}) {
   const app = useAppState();
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
     id: pageNo,
@@ -104,9 +114,10 @@ function Thumb({ pageNo }: { pageNo: number }) {
       style={{ transform: CSS.Transform.toString(transform), transition }}
       {...attributes}
       {...listeners}
-      className={`thumb${selected ? " selected" : ""}${bookmarked ? " bookmarked" : ""}`}
-      onClick={() => store.goToPage(pageNo)}
-      title={`Page ${pageNo} — rotation ${base?.rotation ?? 0}° · double-click ⭐ to bookmark`}
+      className={`thumb${selected ? " selected" : ""}${picked ? " picked" : ""}${bookmarked ? " bookmarked" : ""}`}
+      aria-pressed={picked}
+      onClick={(e) => onPick(pageNo, e)}
+      title={`Page ${pageNo}${base?.rotation ? ` · rotated ${base.rotation}°` : ""} · ⌘-click / Shift-click to select several`}
     >
       {app.session ? (
         <PagePreview
@@ -141,65 +152,106 @@ function Thumb({ pageNo }: { pageNo: number }) {
 function PagesContent() {
   const app = useAppState();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-  const [items, setItems] = useState<number[]>([]);
-  const [sel, setSel] = useState<number[]>([]);
+  const sel = app.selection;
+  const setSel = (next: number[] | ((s: number[]) => number[])) =>
+    store.setPageSelection(typeof next === "function" ? next(app.selection) : next);
+  const [anchor, setAnchor] = useState<number | null>(null);
+  // Optimistic order while a drag is being applied; dropped on any doc change.
+  const [pendingOrder, setPendingOrder] = useState<number[] | null>(null);
+  const docOrder = app.doc?.pages.map((p) => p.page_no) ?? [];
+  const order = pendingOrder ?? docOrder;
+  const count = docOrder.length;
 
-  // Keep a local order mirror for drag; it is authoritative for dnd-kit only.
-  const order = items.length ? items : app.doc?.pages.map((p) => p.page_no) ?? [];
+  useEffect(() => {
+    setPendingOrder(null);
+    setAnchor(null);
+  }, [app.doc?.pages, app.doc?.path]);
+
+  // Keep the current page's thumbnail visible.
+  useEffect(() => {
+    document
+      .querySelector<HTMLElement>(`.thumb-list [data-thumb="${app.currentPage}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [app.currentPage]);
 
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
-    if (!over || active.id === over.id) {
-      return;
-    }
-    const oldIndex = order.indexOf(Number(active.id));
-    const newIndex = order.indexOf(Number(over.id));
-    const next = arrayMove(order, oldIndex, newIndex);
-    setItems(next);
-    void store.reorder(next);
+    if (!over || active.id === over.id) return;
+    const next = arrayMove(order, order.indexOf(Number(active.id)), order.indexOf(Number(over.id)));
+    setPendingOrder(next);
+    void store.reorder(next).then((ok) => !ok && setPendingOrder(null));
   }
 
-  if (!app.doc) {
-    return <div className="pages-empty">No pages</div>;
+  function pick(pageNo: number, e: MouseEvent) {
+    if (e.shiftKey && anchor !== null) {
+      const [a, b] = anchor < pageNo ? [anchor, pageNo] : [pageNo, anchor];
+      setSel(Array.from({ length: b - a + 1 }, (_, i) => a + i));
+    } else if (e.metaKey || e.ctrlKey) {
+      setSel((s) => {
+        const base = s.length ? s : [app.currentPage];
+        return base.includes(pageNo) ? base.filter((p) => p !== pageNo) : [...base, pageNo].sort((x, y) => x - y);
+      });
+      setAnchor(pageNo);
+    } else {
+      // Plain click selects just this page (Finder-style).
+      setSel([pageNo]);
+      setAnchor(pageNo);
+    }
+    store.goToPage(pageNo);
   }
+
+  if (!app.doc) return <div className="pages-empty">No pages</div>;
+
+  const locked = app.doc.passwordRequired || app.busy;
+  const targets = sel.length ? sel : [app.currentPage];
+  const what = sel.length > 1 ? `${sel.length} selected pages` : `page ${targets[0]}`;
 
   return (
     <>
-      <div className="pages-tools">
-        <button
-          onClick={() => void store.rotate(sel, true)}
-          disabled={sel.length === 0}
-          title="Rotate selected 90° CW">
-          ⟳
+      <div className="pages-tools" role="toolbar" aria-label="Page tools">
+        <button onClick={() => void store.rotate(targets, false)} disabled={locked} title={`Rotate ${what} 90° counter-clockwise`} aria-label="Rotate left">
+          <Icon name="rotate-ccw" size={16} />
+        </button>
+        <button onClick={() => void store.rotate(targets, true)} disabled={locked} title={`Rotate ${what} 90° clockwise`} aria-label="Rotate right">
+          <Icon name="rotate-cw" size={16} />
         </button>
         <button
-          onClick={() => void store.deletePages(sel)}
-          disabled={sel.length === 0}
-          title="Delete selected">
-          ✕
+          onClick={() => void store.deletePages(targets)}
+          disabled={locked || targets.length >= count}
+          title={targets.length >= count ? "A document must keep at least one page" : `Delete ${what}`}
+          aria-label="Delete pages">
+          <Icon name="trash" size={16} />
         </button>
-        <button onClick={() => void store.insertBlank(sel[0] ?? 0, 612, 792)} title="Insert blank after selection">
-          +
+        <button
+          onClick={() => void store.insertBlank(targets[targets.length - 1])}
+          disabled={locked}
+          title={`Insert a blank page after page ${targets[targets.length - 1]} (same size)`}
+          aria-label="Insert blank page">
+          <Icon name="insert-blank" size={16} />
         </button>
+        <button onClick={() => void extractTo(targets)} disabled={locked} title={`Save ${what} as a new PDF`} aria-label="Extract pages">
+          <Icon name="extract" size={16} />
+        </button>
+        {sel.length > 1 && (
+          <button onClick={() => setSel([])} title="Clear selection" className="pages-sel">
+            {sel.length} ✓
+          </button>
+        )}
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={order} strategy={verticalListSortingStrategy}>
           <div className="thumb-list">
             {order.map((pageNo) => (
-              <div key={pageNo} onContextMenu={() => toggle(pageNo)}>
-                <Thumb pageNo={pageNo} />
+              <div key={pageNo} data-thumb={pageNo}>
+                <Thumb pageNo={pageNo} picked={sel.length > 1 && sel.includes(pageNo)} onPick={pick} />
               </div>
             ))}
           </div>
         </SortableContext>
       </DndContext>
-      <div className="pages-hint">Drag to reorder · click ⭐ to bookmark · right-click to select</div>
+      <div className="pages-hint">Drag to reorder · ⌘/Shift-click to select · ☆ to bookmark</div>
     </>
   );
-
-  function toggle(pageNo: number) {
-    setSel((s) => (s.includes(pageNo) ? s.filter((p) => p !== pageNo) : [...s, pageNo]));
-  }
 }
 
 function BookmarksContent() {
@@ -278,6 +330,9 @@ export function PageTree() {
           className={`pane-tab${tab === "bookmarks" ? " active" : ""}`}
           onClick={() => store.setPaneTab("bookmarks")}>
           Bookmarks{count > 0 ? ` (${count})` : ""}
+        </button>
+        <button className="pane-close" onClick={() => store.setPaneOpen(false)} title="Close the sidebar (F8 shows it again)" aria-label="Close sidebar">
+          ×
         </button>
       </div>
       {tab === "pages" ? <PagesContent /> : <BookmarksContent />}

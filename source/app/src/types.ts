@@ -83,6 +83,11 @@ export interface Operation {
     | "edit_text"
     | "set_metadata"
     | "merge"
+    | "watermark"
+    | "crop"
+    | "annotate"
+    | "redact"
+    | "object"
     | "open";
   /** Page numbers BEFORE the op (1-based) — revert reference. */
   before: number[];
@@ -113,10 +118,37 @@ export interface SearchResult {
 }
 
 export interface TextRun {
+  /** Box in viewport points at scale 1 (top-left origin), for the overlay. */
   rect: { x: number; y: number; width: number; height: number };
   str: string;
   unicode: string;
   char_rects: { x: number; y: number; width: number; height: number }[];
+  /** Baseline origin in PDF user space (pdf.js item.transform[4..6]). */
+  origin: { x: number; y: number };
+  /** Advance width (PDF units) and font size of the run. */
+  pdfWidth: number;
+  fontSize: number;
+  /** CSS family approximating the PDF font (serif / sans-serif / monospace). */
+  fontFamily: string;
+  /** False for rotated/skewed text, which is not editable inline. */
+  upright: boolean;
+}
+
+/** In-place text edit request (see stitchup_core::textedit). */
+export interface InPlaceEdit {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  font_size: number;
+  old_text: string;
+  new_text: string;
+}
+
+export interface EditResult {
+  pages: PageMeta[];
+  method: "in_place" | "replaced" | "overlay";
+  note: string;
 }
 
 /** In-memory model (STAGE0_DOCUMENT_MODEL §2). */

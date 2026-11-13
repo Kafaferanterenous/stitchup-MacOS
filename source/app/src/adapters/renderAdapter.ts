@@ -92,32 +92,44 @@ export async function renderPage(
   };
 }
 
-/** Text layer runs for selection + search (never used for in-doc edits). */
+/** Text layer runs for selection, search and inline editing. */
 export async function getTextRuns(session: RenderSession, pageNumber: number): Promise<TextRun[]> {
   const page = await session.pdf.getPage(pageNumber);
   const content = await page.getTextContent();
   const viewport = page.getViewport({ scale: 1, rotation: 0 });
-  const extracted: Array<TextRun | null> = content.items.map((item) => {
-    const str = (item as { str?: string }).str;
-    const transform = (item as { transform?: number[] }).transform;
-    if (typeof str !== "string" || transform === undefined) return null;
-    const [a, , , d, e, f]: number[] = transform;
-    const width = Math.abs(a);
-    const height = Math.abs(d);
-    const pt = viewport.convertToViewportPoint(e, f);
-    return {
+  const styles = content.styles as Record<string, { fontFamily?: string; ascent?: number; descent?: number }>;
+  const out: TextRun[] = [];
+  for (const item of content.items) {
+    const it = item as { str?: string; transform?: number[]; width?: number; fontName?: string };
+    if (typeof it.str !== "string" || !it.transform || it.str.length === 0) continue;
+    const [a, b, c, d, e, f] = it.transform;
+    const fontSize = Math.hypot(c, d) || Math.hypot(a, b);
+    if (!(fontSize > 0)) continue;
+    const style = (it.fontName && styles[it.fontName]) || {};
+    const ascent = style.ascent && style.ascent > 0 ? style.ascent : 0.8;
+    const descent = style.descent && style.descent < 0 ? style.descent : -0.2;
+    // pdf.js `width` is the run's advance in PDF units (NOT transform[0],
+    // which is the font scale).
+    const width = Math.max(it.width ?? 0, 0);
+    const [vx, vy] = viewport.convertToViewportPoint(e, f);
+    out.push({
       rect: {
-        x: pt[0],
-        y: pt[1] - height,
+        x: vx,
+        y: vy - fontSize * ascent,
         width,
-        height,
+        height: fontSize * (ascent - descent),
       },
-      str,
-      unicode: str,
+      str: it.str,
+      unicode: it.str,
       char_rects: [],
-    } as TextRun;
-  });
-  return extracted.filter((x): x is TextRun => x !== null);
+      origin: { x: e, y: f },
+      pdfWidth: width,
+      fontSize,
+      fontFamily: style.fontFamily || "sans-serif",
+      upright: Math.abs(b) < 1e-6 && Math.abs(c) < 1e-6 && a > 0 && d > 0,
+    });
+  }
+  return out;
 }
 
 /** Plain substring search over the text layer (Stage 1; not OCR). */
