@@ -146,3 +146,35 @@ export const cmdListFields = () => cmd<FormField[]>("list_fields");
 export const cmdSetField = (name: string, value: string | boolean) => cmd<PageMeta[]>("set_field", { name, value });
 export const cmdInsertImage = (page: number, rect: number[], image: unknown) => cmd<PageMeta[]>("insert_image", { page, rect, image });
 export const cmdReadImage = (path: string) => cmd<{ b64: string }>("read_image_file", { path });
+
+// ---- document tabs
+export const cmdTabNew = () => cmd<number>("tab_new");
+export const cmdTabSwitch = (id: number) => cmd<number>("tab_switch", { id });
+export const cmdTabClose = (id: number) => cmd<void>("tab_close", { id });
+export const cmdMovePagesToTab = (pages: number[], to: number) => cmd<PageMeta[]>("move_pages_to_tab", { pages, to });
+
+// ---- crash recovery
+export interface RecoveryEntry {
+  file: string;
+  name: string;
+  original_path: string | null;
+  saved_at: number;
+  pid: number;
+}
+export const cmdSaveRecovery = () => cmd<number>("save_recovery");
+export const cmdClearRecovery = () => cmd<void>("clear_recovery");
+export const cmdListRecovery = () => cmd<RecoveryEntry[]>("list_recovery");
+export const cmdRestoreRecovery = (file: string) => cmd<OpenPayload>("restore_recovery", { file });
+export const cmdDiscardRecovery = () => cmd<void>("discard_recovery");
+
+// ---- OCR (Apple Vision helper)
+export interface OcrLine {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  confidence: number;
+}
+export const cmdOcrRecognize = (b64: string, languages?: string) => cmd<OcrLine[]>("ocr_recognize", { b64, languages });
+export const cmdOcrApply = (pages: { page: number; rotation: number; lines: OcrLine[] }[]) => cmd<PageMeta[]>("ocr_apply", { pages });

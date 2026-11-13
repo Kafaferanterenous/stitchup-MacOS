@@ -1285,3 +1285,76 @@ kbd {
 .form-field.radio {
   border-radius: 50%;
 }
+
+/* document tabs */
+.tab-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  padding: 0 8px;
+  overflow-x: auto;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.doc-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 6px 0 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--btn-hover);
+  border: 1px solid var(--card-border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.doc-tab.active {
+  color: var(--fg);
+  background: var(--card);
+  border-color: var(--accent);
+  border-bottom: 1px solid var(--card);
+  margin-bottom: -1px;
+}
+
+.doc-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-tab-close,
+.doc-tab-new {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  font-size: 14px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+}
+
+.doc-tab-close:hover,
+.doc-tab-new:hover {
+  color: var(--fg);
+  background: var(--btn-down);
+}
+
+.doc-tab-new {
+  align-self: center;
+  margin-left: 4px;
+}
+
+.recovery-list {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 13px;
+}

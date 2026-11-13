@@ -14,6 +14,8 @@ replaced when you save.
 | Double-click any line to rewrite it in the document's own font | Fill PDF forms; the values show in Preview and Acrobat too |
 | ![Print dialog with a live preview of each sheet (Pastel 3 scheme)](docs/screenshots/print-pastel-3.png) | ![Empty window with the ribbon tabs (Pastel scheme)](docs/screenshots/empty-pastel.png) |
 | Print preview with paper size and orientation | Nine colour schemes, the same as on Windows |
+| ![Two documents open in tabs; the OCR menu on a scanned page (Pastel 2 scheme)](docs/screenshots/tabs-ocr-pastel-2.png) | |
+| Tabs for open documents; OCR makes scanned pages searchable | |
 
 ## Download
 
@@ -38,10 +40,18 @@ not notarized. The first time you open it, right-click it and choose
   Recolour text, change its font and size, insert images (PNG with
   transparency, JPEG, HEIC…) and draw vector shapes.
 - **Forms:** fill text fields, checkboxes, radio buttons and drop-downs.
+- **OCR:** Content ▸ OCR reads scanned pages with Apple's Vision framework, on
+  your Mac (macOS 10.15 or later), and adds the text as an invisible layer.
+  The page looks the same, but you can now search, select and copy its text.
+- **Tabs:** each open document gets its own tab, with its own page, zoom and
+  undo (⌘T, ⌘W, ⌃Tab). Drag a page thumbnail onto another tab to move the page.
 - **Pages:** rotate, delete, add, drag to reorder, multi-select, extract,
   split, merge, import, combine, and auto-crop.
 - **Security:** AES-256 password protection, watermarks, and digital signatures
-  (RSA-2048 / SHA-256 PKCS#7, verifiable with OpenSSL).
+  (RSA-2048 / SHA-256 PKCS#7, verifiable with OpenSSL). Signing an already
+  signed PDF adds an incremental update, so earlier signatures stay valid.
+- **Safety:** quitting with unsaved changes asks first. Optional crash-recovery
+  snapshots (File ▸ Settings, ⌘,) bring unsaved work back after a crash.
 - **Export:** Text, CSV, RTF, DOCX, ODT, and PNG or JPEG images. Print with
   preview; "Save as PDF" is in the macOS print panel. Compress PDF.
 - **Navigation and viewing:** find (⌘F, F3), thumbnails, bookmarks, single,
@@ -66,13 +76,14 @@ Tests:
 |---|---|
 | `cd source/core && cargo test --release` | PDF engine: text editing, annotations, redaction, forms, signatures (checked with OpenSSL), page tree |
 | `cd source/app/src-tauri && cargo test --release` | Command layer |
-| `cd source/app && npm run build && npm run test:e2e` | 66 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
+| `cd source/app && npm run build && npm run test:e2e` | 74 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
 
 ## Layout
 
 ```
 source/core/            Rust PDF engine (lopdf): textedit, annots, objects (redaction),
                         forms, sign, docops, ops (pages), oplog (undo/redo)
+packaging/ocr/          Swift OCR helper (Apple Vision), bundled inside the app
 source/app/             Tauri 2 + React/TypeScript UI (pdf.js renderer)
   src/commands.ts       every ribbon button, menu item and shortcut, defined once
   src-tauri/            commands; examples/dev_bridge.rs serves the e2e tests

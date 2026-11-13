@@ -18,6 +18,7 @@ pub mod annots;
 pub mod objects;
 pub mod std14;
 pub mod forms;
+pub mod ocr;
 
 pub use error::{EngineError, ErrorCode};
 pub use model::{

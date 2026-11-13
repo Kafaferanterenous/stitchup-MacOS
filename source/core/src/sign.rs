@@ -192,20 +192,36 @@ fn encode_with(s: &str, diffs: &[(u8, &'static str)]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Produce the signed file bytes for `doc` (which itself is not modified).
+/// Produce signed file bytes for `doc` (serialized first; `doc` is not modified).
 pub fn sign_document(doc: &PdfDoc, spec: &SignSpec) -> Result<Vec<u8>, EngineError> {
+    let mut d = doc.clone();
+    d.trailer.remove(b"Encrypt");
+    let mut base = Vec::new();
+    d.save_to(&mut base)?;
+    sign_bytes(base, spec)
+}
+
+/// Sign an existing PDF file's bytes as an INCREMENTAL UPDATE: `base` is kept
+/// byte-for-byte and the signature objects are appended after it, so any
+/// signatures already in `base` stay valid.
+pub fn sign_bytes(base: Vec<u8>, spec: &SignSpec) -> Result<Vec<u8>, EngineError> {
     let name = spec.name.trim();
     if name.is_empty() {
         return Err(crate::err!(ErrorCode::ValidationFailed, "enter the signer's name"));
     }
     let now = SystemTime::now();
-    let mut d = doc.clone();
-    d.trailer.remove(b"Encrypt");
-    let pages = d.get_pages();
+    let prev = PdfDoc::load_mem(&base)?;
+    if prev.is_encrypted() {
+        return Err(crate::err!(ErrorCode::Unsupported, "this PDF is password-protected; unlock it, save a copy, then sign"));
+    }
+    let pages = prev.get_pages();
     let page_no = spec.page.unwrap_or(1);
     let page_id = *pages
         .get(&page_no)
         .ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "no page {page_no}"))?;
+    let existing = crate::docops::list_field_names(&prev);
+    let mut inc = lopdf::IncrementalDocument::create_from(base.clone(), prev.clone());
+    let d = &mut inc.new_document;
 
     // Signature dictionary with fixed-size placeholders.
     let mut sig = dictionary! {
@@ -227,7 +243,6 @@ pub fn sign_document(doc: &PdfDoc, spec: &SignSpec) -> Result<Vec<u8>, EngineErr
     // Signature field + widget (visible box or zero-size).
     let rect = spec.rect.unwrap_or([0.0, 0.0, 0.0, 0.0]);
     let (w, h) = ((rect[2] - rect[0]).abs(), (rect[3] - rect[1]).abs());
-    let existing = crate::docops::list_field_names(&d);
     let field_name = (1..).map(|i| format!("Signature{i}")).find(|n| !existing.contains(n)).unwrap();
     let mut widget = dictionary! {
         "Type" => "Annot",
@@ -247,52 +262,61 @@ pub fn sign_document(doc: &PdfDoc, spec: &SignSpec) -> Result<Vec<u8>, EngineErr
         if !spec.location.trim().is_empty() {
             lines.push(format!("Location: {}", spec.location.trim()));
         }
-        let ap = appearance(&mut d, w, h, &lines);
+        let ap = appearance(d, w, h, &lines);
         widget.set("AP", dictionary! { "N" => ap });
     }
     let widget_id = d.add_object(widget);
 
-    // Page /Annots (inline) and catalog /AcroForm.
-    let mut page = d.get_object(page_id)?.as_dict()?.clone();
+    // Updated page (/Annots) and catalog (/AcroForm) go into the new section.
+    let mut page = prev.get_object(page_id)?.as_dict()?.clone();
     let mut annots = match page.get(b"Annots") {
         Ok(Object::Array(a)) => a.clone(),
-        Ok(Object::Reference(r)) => d.get_object(*r).and_then(Object::as_array).cloned().unwrap_or_default(),
+        Ok(Object::Reference(r)) => prev.get_object(*r).and_then(Object::as_array).cloned().unwrap_or_default(),
         _ => vec![],
     };
     annots.push(Object::Reference(widget_id));
     page.set("Annots", annots);
     d.objects.insert(page_id, Object::Dictionary(page));
 
-    let root_id = d.trailer.get(b"Root")?.as_reference()?;
-    let mut catalog = d.get_object(root_id)?.as_dict()?.clone();
-    let mut form: Dictionary = match catalog.get(b"AcroForm") {
-        Ok(Object::Dictionary(f)) => f.clone(),
-        Ok(Object::Reference(r)) => d.get_object(*r).and_then(Object::as_dict).cloned().unwrap_or_default(),
-        _ => Dictionary::new(),
+    let root_id = prev.trailer.get(b"Root")?.as_reference()?;
+    let mut catalog = prev.get_object(root_id)?.as_dict()?.clone();
+    let (form_ref, mut form): (Option<ObjectId>, Dictionary) = match catalog.get(b"AcroForm") {
+        Ok(Object::Dictionary(f)) => (None, f.clone()),
+        Ok(Object::Reference(r)) => (Some(*r), prev.get_object(*r).and_then(Object::as_dict).cloned().unwrap_or_default()),
+        _ => (None, Dictionary::new()),
     };
     let mut fields = match form.get(b"Fields") {
         Ok(Object::Array(a)) => a.clone(),
-        Ok(Object::Reference(r)) => d.get_object(*r).and_then(Object::as_array).cloned().unwrap_or_default(),
+        Ok(Object::Reference(r)) => prev.get_object(*r).and_then(Object::as_array).cloned().unwrap_or_default(),
         _ => vec![],
     };
     fields.push(Object::Reference(widget_id));
     form.set("Fields", fields);
     form.set("SigFlags", 3);
-    catalog.set("AcroForm", Object::Dictionary(form));
+    match form_ref {
+        Some(r) => {
+            d.objects.insert(r, Object::Dictionary(form));
+        }
+        None => catalog.set("AcroForm", Object::Dictionary(form)),
+    }
     d.objects.insert(root_id, Object::Dictionary(catalog));
 
-    // Serialize (classic xref, no object streams: the placeholders must stay
-    // literally in the file).
     let mut bytes = Vec::new();
-    d.save_to(&mut bytes)?;
+    inc.save_to(&mut bytes)?;
 
-    // Locate /Contents <000…> and /ByteRange [0 1111111111 …].
+    // Locate the placeholders in the APPENDED part only.
+    let tail = base.len();
     let zeros = vec![b'0'; SIG_SPACE * 2];
-    let start = find(&bytes, &zeros).and_then(|i| i.checked_sub(1)).filter(|&i| bytes[i] == b'<')
+    let start = find(&bytes[tail..], &zeros)
+        .map(|i| i + tail)
+        .and_then(|i| i.checked_sub(1))
+        .filter(|&i| bytes[i] == b'<')
         .ok_or_else(|| crate::err!(ErrorCode::IoError, "signature placeholder not found"))?;
     let end = start + SIG_SPACE * 2 + 2; // past '>'
     let br_text = BR_PLACEHOLDER.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
-    let br_at = find(&bytes, br_text.as_bytes()).ok_or_else(|| crate::err!(ErrorCode::IoError, "byte range placeholder not found"))?;
+    let br_at = find(&bytes[tail..], br_text.as_bytes())
+        .map(|i| i + tail)
+        .ok_or_else(|| crate::err!(ErrorCode::IoError, "byte range placeholder not found"))?;
     let br = format!("0 {} {} {}", start, end, bytes.len() - end);
     if br.len() > br_text.len() {
         return Err(crate::err!(ErrorCode::IoError, "document too large to sign"));

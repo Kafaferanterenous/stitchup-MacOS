@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useAppState, store, getState, docName, isUntitled, rgb } from "../../store";
 import { extractTo, parsePages, splitInto } from "../../actions";
-import { cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo } from "../../ipc";
+import { cmdDiscardRecovery, cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo, type RecoveryEntry } from "../../ipc";
+import { loadSettings, saveSettings, type Settings } from "../../settings";
+import { THEMES, applyTheme, currentTheme, type ThemeName } from "../../themes/theme";
 import { pageImage, toBase64 } from "../../export";
 import { PAPERS, fitOnSheet, printDocument } from "../../print";
 import { renderPage } from "../../adapters/renderAdapter";
@@ -964,6 +966,99 @@ export function FontDialog() {
           Apply
         </button>
         <button onClick={close}>Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ---------------------------------------------------------------- settings
+
+export function SettingsDialog() {
+  const [st, setSt] = useState<Settings>(loadSettings);
+  const [scheme, setScheme] = useState<ThemeName>(currentTheme());
+  function save() {
+    saveSettings(st);
+    void applyTheme(scheme);
+    store.notify("Settings saved");
+    close();
+  }
+  return (
+    <Modal title="Settings" onClose={close}>
+      <label>
+        Crash-recovery snapshots
+        <select aria-label="Crash-recovery snapshots" value={st.recoverySeconds} onChange={(e) => setSt({ ...st, recoverySeconds: Number(e.target.value) })}>
+          <option value={0}>Off</option>
+          <option value={30}>Every 30 seconds</option>
+          <option value={60}>Every minute</option>
+          <option value={300}>Every 5 minutes</option>
+        </select>
+      </label>
+      <p className="muted">
+        Unsaved documents are copied into Stitchup’s private folder (never over your files) and offered back if Stitchup quits
+        unexpectedly. Your own files are only written when you save.
+      </p>
+      <label>
+        When a document opens
+        <select aria-label="Opening zoom" value={st.openZoom} onChange={(e) => setSt({ ...st, openZoom: e.target.value as Settings["openZoom"] })}>
+          <option value="fit-width">Fit width</option>
+          <option value="fit-page">Fit page</option>
+          <option value="actual">100%</option>
+        </select>
+      </label>
+      <label className="inline-check">
+        <input type="checkbox" checked={st.sidebarOnOpen} onChange={(e) => setSt({ ...st, sidebarOnOpen: e.target.checked })} /> Show the page sidebar
+      </label>
+      <label>
+        Colour scheme
+        <select aria-label="Colour scheme" value={scheme} onChange={(e) => setScheme(e.target.value as ThemeName)}>
+          {THEMES.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="modal-actions">
+        <button onClick={save}>Save</button>
+        <button onClick={close}>Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Offered at launch when a previous Stitchup left unsaved snapshots behind. */
+export function RecoveryDialog({ entries, onDone }: { entries: RecoveryEntry[]; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function restoreAll() {
+    setBusy(true);
+    for (const e of entries) await store.restoreRecovered(e.file, e.name);
+    await cmdDiscardRecovery().catch(() => {});
+    onDone();
+  }
+  async function discard() {
+    await cmdDiscardRecovery().catch(() => {});
+    onDone();
+  }
+  return (
+    <Modal title="Recover unsaved documents?" onClose={onDone}>
+      <p>Stitchup didn’t close properly last time. These documents had unsaved changes:</p>
+      <ul className="recovery-list">
+        {entries.map((e) => (
+          <li key={e.file}>
+            <b>{e.name}</b>
+            <span className="muted"> — {new Date(e.saved_at * 1000).toLocaleString()}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="muted">Recovered documents open as new, unsaved documents; use Save As to keep them.</p>
+      <div className="modal-actions">
+        <button onClick={() => void restoreAll()} disabled={busy} autoFocus>
+          Recover
+        </button>
+        <button onClick={() => void discard()} disabled={busy}>
+          Discard
+        </button>
       </div>
     </Modal>
   );

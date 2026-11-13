@@ -20,8 +20,10 @@ export async function installMenu(): Promise<void> {
     const make = async (id: string): Promise<MenuItem> => {
       const c = byId.get(id)!;
       const text = (c.menu ?? c.label) + (c.soon ? " (coming soon)" : "");
-      const mi = await MenuItem.new({ id, text, accelerator: c.accel, action: () => void runCommand(id) });
-      items.set(id, mi);
+      // An id may appear in two menus (Settings): the second copy gets a suffix.
+      const uid = items.has(id) ? `${id}#2` : id;
+      const mi = await MenuItem.new({ id: uid, text, accelerator: items.has(id) ? undefined : c.accel, action: () => void runCommand(id) });
+      if (!items.has(id)) items.set(id, mi);
       return mi;
     };
     const sep = () => PredefinedMenuItem.new({ item: "Separator" });
@@ -55,6 +57,8 @@ export async function installMenu(): Promise<void> {
         text: "Stitchup",
         items: [
           await make("about"),
+          await sep(),
+          await make("settings"),
           await sep(),
           await PredefinedMenuItem.new({ item: "Services" }),
           await sep(),

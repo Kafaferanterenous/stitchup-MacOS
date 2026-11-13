@@ -464,6 +464,12 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
       { label: "Extract Page…", run: () => void extractTo([pageNo]), disabled: !canEdit },
       { label: "Delete Page", run: () => void store.deletePages([pageNo]), disabled: !canEdit || app.busy || pages <= 1 },
     );
+    const others = app.tabs.filter((t) => t.id !== app.activeTab && t.name !== "New Tab");
+    if (others.length) {
+      items.push("-");
+      for (const t of others)
+        items.push({ label: `Move Page to “${t.name}”`, run: () => void store.movePagesToTab([pageNo], t.id), disabled: !canEdit || app.busy || pages <= 1 });
+    }
     return items;
   }
 

@@ -60,9 +60,26 @@ pub fn run() {
             commands::set_field,
             commands::insert_image,
             commands::read_image_file,
+            commands::tab_new,
+            commands::tab_switch,
+            commands::tab_close,
+            commands::move_pages_to_tab,
+            commands::ocr_recognize,
+            commands::ocr_apply,
+            commands::save_recovery,
+            commands::clear_recovery,
+            commands::list_recovery,
+            commands::restore_recovery,
+            commands::discard_recovery,
             commands::quit_app,
         ])
-        .setup(|_app| {
+        .setup(|app| {
+            // Crash-recovery snapshots live in the app's private data folder.
+            if let Ok(dir) = app.path().app_data_dir() {
+                if let Ok(mut d) = commands::RECOVERY_DIR.lock() {
+                    *d = Some(dir.join("Recovery"));
+                }
+            }
             // `stitchup file.pdf` from a shell.
             let args: Vec<String> = std::env::args().skip(1).filter(|a| a.to_lowercase().ends_with(".pdf")).collect();
             if let Ok(mut q) = commands::PENDING_OPEN.lock() {

@@ -4,7 +4,7 @@ use std::process::Command;
 
 use lopdf::Document as PdfDoc;
 use stitchup_core::docops::new_blank;
-use stitchup_core::sign::{list_signatures, sign_document, SignSpec};
+use stitchup_core::sign::{list_signatures, sign_bytes, sign_document, SignSpec};
 
 fn spec(visible: bool) -> SignSpec {
     SignSpec {
@@ -17,17 +17,17 @@ fn spec(visible: bool) -> SignSpec {
     }
 }
 
-/// (signed data, DER signature) extracted using /ByteRange and /Contents.
-fn parts(pdf: &[u8]) -> (Vec<u8>, Vec<u8>) {
+/// (signed data, DER signature) for the `nth` signature (by /ByteRange order).
+fn parts_n(pdf: &[u8], nth: usize) -> (Vec<u8>, Vec<u8>) {
     let s = String::from_utf8_lossy(pdf);
-    let at = s.find("/ByteRange").unwrap();
+    let at = s.match_indices("/ByteRange").nth(nth).unwrap().0;
     let nums: Vec<usize> = s[at..][s[at..].find('[').unwrap() + 1..s[at..].find(']').unwrap()]
         .split_whitespace()
         .map(|n| n.parse().unwrap())
         .collect();
     let (a, b, c, d) = (nums[0], nums[1], nums[2], nums[3]);
     assert_eq!(a, 0);
-    assert_eq!(c + d, pdf.len(), "byte range must cover to the end of file");
+    assert!(c + d <= pdf.len(), "byte range within the file");
     let mut data = pdf[a..a + b].to_vec();
     data.extend_from_slice(&pdf[c..c + d]);
     let hex = std::str::from_utf8(&pdf[b + 1..c - 1]).unwrap();
@@ -42,6 +42,10 @@ fn parts(pdf: &[u8]) -> (Vec<u8>, Vec<u8>) {
     };
     der.truncate(len);
     (data, der)
+}
+
+fn parts(pdf: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    parts_n(pdf, 0)
 }
 
 fn openssl_verifies(data: &[u8], der: &[u8]) -> bool {
@@ -88,4 +92,20 @@ fn invisible_signature_and_second_signature_get_unique_fields() {
     let fields = stitchup_core::docops::list_field_names(&PdfDoc::load_mem(&twice).unwrap());
     assert!(fields.contains(&"Signature1".to_string()) && fields.contains(&"Signature2".to_string()), "{fields:?}");
     assert!(sign_document(&doc, &SignSpec { name: "  ".into(), ..spec(false) }).is_err());
+}
+
+#[test]
+fn second_signature_is_incremental_and_both_still_verify() {
+    let doc = new_blank(612.0, 792.0).unwrap();
+    let first = sign_document(&doc, &spec(true)).unwrap();
+    let second = sign_bytes(first.clone(), &SignSpec { name: "Anna Nowak".into(), rect: Some([40.0, 40.0, 260.0, 100.0]), ..spec(true) }).unwrap();
+    assert!(second.starts_with(&first), "the first revision is kept byte-for-byte");
+    let (d1, s1) = parts_n(&second, 0);
+    let (d2, s2) = parts_n(&second, 1);
+    assert!(openssl_verifies(&d1, &s1), "first signature still valid");
+    assert!(openssl_verifies(&d2, &s2), "second signature valid");
+    assert_eq!(d2.len() + 2 * 12_000 + 2, second.len(), "second signature covers the whole file");
+    let back = PdfDoc::load_mem(&second).unwrap();
+    let names: Vec<String> = list_signatures(&back).into_iter().map(|s| s.0).collect();
+    assert!(names.contains(&"Jan Kowalski".into()) && names.contains(&"Anna Nowak".into()), "{names:?}");
 }

@@ -16,6 +16,8 @@ source/app/public/
 **/target/
 **/src-tauri/gen/
 **/src-tauri/bundle/
+# Built by packaging/ocr/build.sh
+source/app/src-tauri/binaries/
 
 # Editor
 .vscode/

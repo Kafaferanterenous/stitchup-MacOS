@@ -5,8 +5,11 @@ import { useAppState, store, docName, getState } from "./store";
 import { COMMANDS, matchesKey, runCommand } from "./commands";
 import { installMenu, nativeMenuActive } from "./menu";
 import { applyTheme, type ThemeName } from "./themes/theme";
-import { cmdTakePendingOpen } from "./ipc";
+import { cmdClearRecovery, cmdListRecovery, cmdSaveRecovery, cmdTakePendingOpen, type RecoveryEntry } from "./ipc";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { loadSettings, type Settings } from "./settings";
 import { Ribbon } from "./features/ribbon/Ribbon";
+import { TabStrip } from "./features/common/TabStrip";
 import { Viewer } from "./features/viewer/Viewer";
 import { PageTree } from "./features/pageops/PageTree";
 import { MessageBox } from "./features/common/MessageBox";
@@ -15,6 +18,8 @@ import {
   AboutDialog,
   AddPageDialog,
   AnnotInputDialog,
+  RecoveryDialog,
+  SettingsDialog,
   FontDialog,
   RecolorDialog,
   SignDialog,
@@ -47,6 +52,52 @@ function typing(e: KeyboardEvent): boolean {
 export default function App() {
   const app = useAppState();
   const [dropping, setDropping] = useState(false);
+  const [recovered, setRecovered] = useState<RecoveryEntry[] | null>(null);
+
+  // Crash recovery: offer snapshots left by a Stitchup that crashed…
+  useEffect(() => {
+    cmdListRecovery().then((list) => list.length && setRecovered(list), () => {});
+  }, []);
+  // …and take snapshots of unsaved tabs at the chosen interval.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const arm = (s: Settings) => {
+      if (timer) clearInterval(timer);
+      timer = null;
+      if (s.recoverySeconds > 0) {
+        timer = setInterval(() => {
+          if (store.anyDirty()) void cmdSaveRecovery().catch(() => {});
+          else void cmdClearRecovery().catch(() => {});
+        }, s.recoverySeconds * 1000);
+      }
+    };
+    arm(loadSettings());
+    const onChange = (e: Event) => arm((e as CustomEvent<Settings>).detail);
+    window.addEventListener("stitchup-settings", onChange);
+    return () => {
+      if (timer) clearInterval(timer);
+      window.removeEventListener("stitchup-settings", onChange);
+    };
+  }, []);
+
+  // Closing the window with unsaved changes asks first (like ⌘Q).
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    try {
+      getCurrentWindow()
+        .onCloseRequested(async (e) => {
+          if (!(await store.confirmDiscard("Close Stitchup"))) {
+            e.preventDefault();
+            return;
+          }
+          await cmdClearRecovery().catch(() => {});
+        })
+        .then((f) => (un = f), () => {});
+    } catch {
+      /* not inside Tauri */
+    }
+    return () => un?.();
+  }, []);
 
   // Native menu + files handed to us by Finder / the Dock / the command line.
   useEffect(() => {
@@ -127,6 +178,7 @@ export default function App() {
   return (
     <div className="app-shell" data-view={app.viewMode}>
       <Ribbon />
+      <TabStrip />
       <main className="app-body" data-pane={app.paneOpen && app.doc ? "open" : "hidden"}>
         <section className="viewer-pane" aria-label="document viewer">
           <Viewer />
@@ -174,6 +226,8 @@ export default function App() {
       {app.dialog === "recolor" && <RecolorDialog />}
       {app.dialog === "font" && <FontDialog />}
       {app.pendingInput && <AnnotInputDialog />}
+      {app.dialog === "settings" && <SettingsDialog />}
+      {recovered && <RecoveryDialog entries={recovered} onDone={() => setRecovered(null)} />}
       <PasswordDialog />
       <MessageBox />
       {app.notice && (

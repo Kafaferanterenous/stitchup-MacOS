@@ -43,14 +43,31 @@ import {
   cmdInsertShape,
   cmdSetField,
   cmdInsertImage,
+  cmdTabNew,
+  cmdTabSwitch,
+  cmdTabClose,
+  cmdMovePagesToTab,
+  cmdRestoreRecovery,
+  cmdClearRecovery,
+  cmdOcrRecognize,
+  cmdOcrApply,
+  type OcrLine,
 } from "./ipc";
+import { pageImage, toBase64 } from "./export";
+import { loadSettings } from "./settings";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { search as searchText } from "./adapters/renderAdapter";
 
 /** Virtual path prefix the backend gives never-saved documents. */
 export const UNTITLED = "stitchup-untitled:";
 export const isUntitled = (doc: Document | null) => !!doc && doc.path.startsWith(UNTITLED);
+/** Friendly names for untitled documents (e.g. recovered after a crash). */
+const displayNames = new Map<string, string>();
+
 export function docName(doc: Document | null): string {
   if (!doc) return "";
+  const shown = displayNames.get(doc.path);
+  if (shown) return shown;
   if (isUntitled(doc)) return `Untitled ${doc.path.slice(UNTITLED.length)}`;
   return doc.path.split(/[\\/]/).pop() ?? doc.path;
 }
@@ -115,7 +132,35 @@ export interface AppState {
   pendingInput: PendingInput | null;
   /** Image waiting to be placed by the Image tool. */
   pendingImage: PendingImage | null;
+  /** Open document tabs (the active one's live state is the rest of AppState). */
+  tabs: TabInfo[];
+  activeTab: number;
 }
+
+export interface TabInfo {
+  id: number;
+  name: string;
+  path: string | null;
+  dirty: boolean;
+}
+
+/** Per-tab view state, parked while another tab is active. */
+interface TabSlice {
+  doc: Document | null;
+  currentPage: number;
+  zoom: number;
+  zoomMode: AppState["zoomMode"];
+  viewMode: AppState["viewMode"];
+  savedLen: number;
+  selection: number[];
+  query: string;
+  lastCommit: AppState["lastCommit"];
+  statusMessage: string;
+  /** The backend changed this tab's document while it was parked. */
+  stale?: boolean;
+}
+
+const parked = new Map<number, TabSlice>();
 
 export interface PendingImage {
   /** "jpeg" (original bytes) or "rgba" (decoded pixels). */
@@ -173,7 +218,9 @@ export type Dialog =
   | "help"
   | "sign"
   | "recolor"
-  | "font";
+  | "font"
+  | "settings"
+  | "recovery";
 
 let state: AppState = {
   doc: null,
@@ -211,6 +258,36 @@ let state: AppState = {
   picked: null,
   pendingInput: null,
   pendingImage: null,
+  tabs: [{ id: 1, name: "New Tab", path: null, dirty: false }],
+  activeTab: 1,
+};
+
+function sliceOf(s: AppState): TabSlice {
+  return {
+    doc: s.doc,
+    currentPage: s.currentPage,
+    zoom: s.zoom,
+    zoomMode: s.zoomMode,
+    viewMode: s.viewMode,
+    savedLen: s.savedLen,
+    selection: s.selection,
+    query: s.query,
+    lastCommit: s.lastCommit,
+    statusMessage: s.statusMessage,
+  };
+}
+
+const EMPTY_SLICE: TabSlice = {
+  doc: null,
+  currentPage: 1,
+  zoom: 1,
+  zoomMode: "fit-width",
+  viewMode: "continuous",
+  savedLen: 0,
+  selection: [],
+  query: "",
+  lastCommit: null,
+  statusMessage: "No document open",
 };
 
 /** "#rrggbb" → [r, g, b] in 0..1. */
@@ -225,6 +302,17 @@ let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 function set(partial: Partial<AppState>) {
   state = { ...state, ...partial };
+  // The active tab's label follows its document.
+  const t = state.tabs.find((x) => x.id === state.activeTab);
+  if (t) {
+    const d = state.doc;
+    const name = d ? docName(d) : "New Tab";
+    const dirty = !!d && (d.history.length !== state.savedLen || (isUntitled(d) && d.history.length > 0));
+    const path = d && !isUntitled(d) ? d.path : null;
+    if (t.name !== name || t.dirty !== dirty || t.path !== path) {
+      state = { ...state, tabs: state.tabs.map((x) => (x.id === t.id ? { ...x, name, dirty, path } : x)) };
+    }
+  }
   listeners.forEach((l) => l());
 }
 
@@ -291,13 +379,22 @@ function legacyCopy(text: string): boolean {
 
 export const store = {
   async open(path: string) {
+    // Already open in a tab → just show it.
+    const existing = state.tabs.find((t) => t.path === path);
+    if (existing) {
+      await this.switchTab(existing.id);
+      return;
+    }
+    await this.freshTab();
     set({ busy: true, lastError: null });
     try {
       const doc = await openDocumentAdapter.open(path);
       set({
         doc,
         currentPage: 1,
-        zoomMode: "fit-width",
+        zoomMode: loadSettings().openZoom === "actual" ? "actual" : loadSettings().openZoom,
+        zoom: loadSettings().openZoom === "actual" ? 1 : state.zoom,
+        paneOpen: loadSettings().sidebarOnOpen,
         scrollSeq: state.scrollSeq + 1,
         selection: [],
         savedLen: 0,
@@ -308,7 +405,7 @@ export const store = {
         unlockOpen: doc.passwordRequired,
         statusMessage: doc.passwordRequired
           ? "This document is password-protected"
-          : `Opened ${doc.pages.length} pages`,
+          : `Opened ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"}`,
       });
       const w = doc.warnings.filter((x) => !/password-protected/.test(x));
       if (!doc.passwordRequired && w.length) {
@@ -345,11 +442,13 @@ export const store = {
 
   /** Start a new blank document (Letter, A4, ...). */
   async newDocument(widthPt: number, heightPt: number) {
+    await this.freshTab();
     return this.adopt(() => cmdNew(widthPt, heightPt), "New document");
   },
 
   /** Combine several PDFs into a new untitled document. */
   async combine(paths: string[]) {
+    await this.freshTab();
     return this.adopt(() => cmdCombine(paths), `Combined ${paths.length} files`);
   },
 
@@ -361,7 +460,9 @@ export const store = {
       set({
         doc,
         currentPage: 1,
-        zoomMode: "fit-width",
+        zoomMode: loadSettings().openZoom === "actual" ? "actual" : loadSettings().openZoom,
+        zoom: loadSettings().openZoom === "actual" ? 1 : state.zoom,
+        paneOpen: loadSettings().sidebarOnOpen,
         scrollSeq: state.scrollSeq + 1,
         selection: [],
         savedLen: 0,
@@ -549,6 +650,57 @@ export const store = {
     return ok;
   },
 
+  /**
+   * OCR: recognise text on scanned pages (Apple Vision, on this Mac) and add
+   * it as an invisible layer — the page looks the same but becomes
+   * searchable and copyable. `scope`: the current page, pages with no text
+   * yet, or every page. One undo step.
+   */
+  async recognizeText(scope: "current" | "untexted" | "all") {
+    const doc = state.doc;
+    const session = state.session;
+    if (!doc || !session) return false;
+    let pages = scope === "current" ? [state.currentPage] : doc.pages.map((p) => p.page_no);
+    if (scope === "untexted") {
+      const bare: number[] = [];
+      for (const n of pages) {
+        const tc = await (await session.pdf.getPage(n)).getTextContent();
+        if (!tc.items.some((i) => "str" in i && i.str.trim())) bare.push(n);
+      }
+      if (!bare.length) {
+        this.notify("Every page already has text — choose This Page or All Pages to recognise anyway");
+        return false;
+      }
+      pages = bare;
+    }
+    const found: { page: number; rotation: number; lines: OcrLine[] }[] = [];
+    set({ busy: true });
+    try {
+      for (const [i, n] of pages.entries()) {
+        this.notify(`Recognising text: page ${i + 1} of ${pages.length}…`);
+        const rotation = doc.pages.find((p) => p.page_no === n)?.rotation ?? 0;
+        const png = await pageImage(session, n, rotation, 300, "image/png");
+        const lines = await cmdOcrRecognize(toBase64(png));
+        if (lines.length) found.push({ page: n, rotation, lines });
+      }
+    } catch (e) {
+      set({ busy: false });
+      this.notify(`Text recognition failed: ${(e as { message?: string }).message ?? e}`);
+      return false;
+    }
+    set({ busy: false });
+    const total = found.reduce((a, p) => a + p.lines.length, 0);
+    if (!total) {
+      this.notify(`No text found on ${pages.length === 1 ? "this page" : `${pages.length} pages`}`);
+      return false;
+    }
+    return this.command(
+      { kind: "object", before: doc.pages.map((p) => p.page_no), data: { ocr: found.length } },
+      () => cmdOcrApply(found),
+      () => ({ status: `Recognised ${total} line${total === 1 ? "" : "s"} on ${found.length} page${found.length === 1 ? "" : "s"} — now searchable`, page: found[0].page }),
+    );
+  },
+
   /** Fill a form field (text/choice: string; checkbox: boolean; radio: option). */
   async setField(name: string, value: string | boolean) {
     const doc = state.doc;
@@ -652,6 +804,108 @@ export const store = {
       () => cmdInsertShape(page, spec),
       () => ({ status: `Inserted ${spec.kind} on page ${page}`, page }),
     );
+  },
+
+  // ---- document tabs
+  /** Use the current tab if it is empty, otherwise open a new one. */
+  async freshTab() {
+    if (state.doc) await this.newTab();
+  },
+
+  async newTab(): Promise<number> {
+    let id: number;
+    try {
+      id = await cmdTabNew();
+    } catch {
+      return state.activeTab;
+    }
+    parked.set(state.activeTab, sliceOf(state));
+    set({
+      ...EMPTY_SLICE,
+      tabs: [...state.tabs, { id, name: "New Tab", path: null, dirty: false }],
+      activeTab: id,
+      session: null,
+      searchHits: [],
+      searchIndex: -1,
+      picked: null,
+      tool: null,
+      editMode: false,
+      scrollSeq: state.scrollSeq + 1,
+    });
+    return id;
+  },
+
+  async switchTab(id: number) {
+    if (id === state.activeTab || !state.tabs.some((t) => t.id === id)) return;
+    await cmdTabSwitch(id);
+    parked.set(state.activeTab, sliceOf(state));
+    const slice = parked.get(id) ?? EMPTY_SLICE;
+    parked.delete(id);
+    set({ ...slice, stale: undefined, activeTab: id, session: null, searchHits: [], searchIndex: -1, picked: null, tool: null, editMode: false, scrollSeq: state.scrollSeq + 1 } as Partial<AppState>);
+    if (slice.stale && slice.doc) {
+      // Pages arrived from another tab while this one was parked.
+      const next = await withFreshBytes(await refreshPages(slice.doc));
+      set({ doc: { ...next, history: [...slice.doc.history, { kind: "merge", before: [], data: "from tab" }], redo: [] } });
+    }
+  },
+
+  async closeTab(id: number) {
+    const t = state.tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (t.dirty) {
+      let ok = false;
+      try {
+        ok = await ask(`“${t.name}” has unsaved changes. Close it anyway?`, { title: "Close tab", kind: "warning", okLabel: "Close", cancelLabel: "Cancel" });
+      } catch {
+        ok = window.confirm(`“${t.name}” has unsaved changes. Close it anyway?`);
+      }
+      if (!ok) return;
+    }
+    const idx = state.tabs.findIndex((x) => x.id === id);
+    if (id === state.activeTab) {
+      const other = state.tabs[idx + 1] ?? state.tabs[idx - 1];
+      if (other) {
+        await this.switchTab(other.id);
+      } else {
+        // Last tab: keep an empty one.
+        await cmdTabClose(id).catch(() => {});
+        set({ ...EMPTY_SLICE, session: null, searchHits: [], searchIndex: -1, picked: null, tool: null });
+        return;
+      }
+    }
+    await cmdTabClose(id).catch(() => {});
+    parked.delete(id);
+    set({ tabs: state.tabs.filter((x) => x.id !== id) });
+  },
+
+  async cycleTab(step: 1 | -1) {
+    const i = state.tabs.findIndex((t) => t.id === state.activeTab);
+    const next = state.tabs[(i + step + state.tabs.length) % state.tabs.length];
+    if (next) await this.switchTab(next.id);
+  },
+
+  /** Move pages of the active document to the end of another tab's document. */
+  async movePagesToTab(pages: number[], to: number) {
+    const doc = state.doc;
+    const target = state.tabs.find((t) => t.id === to);
+    if (!doc || !target) return false;
+    const ok = await this.command(
+      { kind: "delete", before: doc.pages.map((p) => p.page_no), data: { pages, to } },
+      () => cmdMovePagesToTab(pages, to),
+      () => ({ status: `Moved ${pages.length} page${pages.length > 1 ? "s" : ""} to “${target.name}”` }),
+    );
+    if (ok) {
+      const slice = parked.get(to);
+      if (slice) parked.set(to, { ...slice, stale: true });
+      state = { ...state, tabs: state.tabs.map((t) => (t.id === to ? { ...t, dirty: true } : t)) };
+      listeners.forEach((l) => l());
+    }
+    return ok;
+  },
+
+  /** Any tab (active or parked) with unsaved changes? */
+  anyDirty(): boolean {
+    return state.tabs.some((t) => t.dirty);
   },
 
   setUnlockOpen(open: boolean) {
@@ -1085,9 +1339,36 @@ export const store = {
     set({ lastError: null });
   },
 
-  /** Quit the app (File ▸ Exit). */
+  /** Quit the app (⌘Q): asks first when any tab has unsaved changes. */
   async exitApp(): Promise<void> {
+    if (!(await this.confirmDiscard("Quit Stitchup"))) return;
+    await cmdClearRecovery().catch(() => {});
     await cmdQuit();
+  },
+
+  /** True when there is nothing unsaved, or the user agrees to lose it. */
+  async confirmDiscard(title: string): Promise<boolean> {
+    const dirty = state.tabs.filter((t) => t.dirty);
+    if (!dirty.length) return true;
+    const names = dirty.map((t) => `“${t.name}”`).join(", ");
+    const msg = `${names} ${dirty.length > 1 ? "have" : "has"} unsaved changes. Discard them and quit?`;
+    try {
+      return await ask(msg, { title, kind: "warning", okLabel: "Discard and Quit", cancelLabel: "Cancel" });
+    } catch {
+      return window.confirm(msg);
+    }
+  },
+
+  /** Re-open a crash-recovery snapshot in its own tab. */
+  async restoreRecovered(file: string, name: string) {
+    await this.freshTab();
+    const label = `${name.replace(/\.pdf$/i, "")} (recovered).pdf`;
+    const ok = await this.adopt(async () => {
+      const payload = await cmdRestoreRecovery(file);
+      displayNames.set(payload.path, label);
+      return payload;
+    }, `Recovered ${name} — use Save As to keep it`);
+    return ok;
   },
 };
 

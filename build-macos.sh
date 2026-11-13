@@ -10,6 +10,9 @@ source ../tools/env.sh
 APP_DIR=source/app
 VERSION=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' "$APP_DIR/src-tauri/tauri.conf.json" | head -1)
 
+echo "==> OCR helper (Swift, Apple Vision)"
+./packaging/ocr/build.sh
+
 if [ "${1:-}" != "--quick" ]; then
   echo "==> Core + command-layer tests"
   (cd source/core && cargo test --release --quiet)

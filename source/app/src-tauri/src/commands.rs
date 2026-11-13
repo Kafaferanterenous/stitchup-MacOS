@@ -41,6 +41,14 @@ pub struct SessionState {
     /// Password the document was unlocked with: Save in place re-encrypts with
     /// it, so a protected file is never silently written back unprotected.
     pub password: Option<String>,
+    /// `oplog.undo.len()` at the last save (unsaved = differs).
+    pub saved_ops: usize,
+}
+
+impl SessionState {
+    pub fn dirty(&self) -> bool {
+        self.doc.is_some() && (self.untitled && !self.oplog.undo.is_empty() || self.oplog.undo.len() != self.saved_ops)
+    }
 }
 
 /// Virtual path prefix for never-saved documents.
@@ -691,6 +699,7 @@ pub fn new_document_inner(st: &Mutex<SessionState>, width_pt: f64, height_pt: f6
         oplog: OpLog::default(),
         untitled: true,
         password: None,
+        saved_ops: 0,
     };
     payload_for(false, path, &hash, bytes.len() as u64, &[], g.doc.as_ref().unwrap(), &bytes)
 }
@@ -748,6 +757,7 @@ pub fn adopt_saved_path_inner(st: &Mutex<SessionState>, path: String) -> Result<
     g.source_hash = Some(stitchup_core::hash::sha256_hex(&bytes));
     g.source_size = bytes.len() as u64;
     g.untitled = false;
+    g.saved_ops = g.oplog.undo.len();
     // Save As writes an unprotected copy, so the adopted file has no password.
     g.password = None;
     let doc = g.doc.as_mut().ok_or_else(no_doc)?;
@@ -797,6 +807,7 @@ pub fn save_document_inner(st: &Mutex<SessionState>) -> Result<CommitResult, Eng
     g.source_hash = Some(result.new_sha256.clone());
     g.source_size = result.size_bytes;
     g.opened_bytes = Some(render);
+    g.saved_ops = g.oplog.undo.len();
     Ok(result)
 }
 
@@ -1155,7 +1166,16 @@ pub fn sign_document_inner(st: &Mutex<SessionState>, target: String, spec: Value
     let g = lock(st)?;
     let target = PathBuf::from(target);
     guard_target(&g, &target, true)?;
-    let bytes = sign::sign_document(g.doc.as_ref().ok_or_else(no_doc)?, &spec)?;
+    // Unchanged since it was opened/saved → sign the file's exact bytes as an
+    // incremental update, so signatures already in it stay valid.
+    let pristine = !g.dirty() && !g.untitled && g.password.is_none();
+    let on_disk = g.path.as_ref().and_then(|p| std::fs::read(p).ok()).filter(|b| {
+        g.source_hash.as_deref() == Some(stitchup_core::hash::sha256_hex(b).as_str())
+    });
+    let bytes = match (pristine, on_disk) {
+        (true, Some(b)) => sign::sign_bytes(b, &spec)?,
+        _ => sign::sign_document(g.doc.as_ref().ok_or_else(no_doc)?, &spec)?,
+    };
     write_atomic(&target, &bytes)
 }
 
@@ -1232,6 +1252,337 @@ pub fn read_image_file(path: String) -> Result<HashMap<String, String>, EngineEr
         return Err(EngineError::new(ErrorCode::ValidationFailed, "image is larger than 60 MB"));
     }
     Ok(HashMap::from([("b64".to_string(), B64.encode(std::fs::read(&path)?))]))
+}
+
+// ---------------------------------------------------------------------------
+// Document tabs: every tab is its own session; inactive ones are parked here.
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+pub struct TabStore {
+    pub active: u32,
+    pub next: u32,
+    pub parked: HashMap<u32, SessionState>,
+}
+
+pub static TABS: Mutex<Option<TabStore>> = Mutex::new(None);
+
+fn tabs<'a>() -> Result<MutexGuard<'a, Option<TabStore>>, EngineError> {
+    let mut t = TABS.lock().map_err(|_| EngineError::new(ErrorCode::IoError, "tab lock poisoned"))?;
+    if t.is_none() {
+        *t = Some(TabStore { active: 1, next: 2, parked: HashMap::new() });
+    }
+    Ok(t)
+}
+
+/// Park the current document and start an empty tab; returns its id.
+#[tauri::command]
+pub fn tab_new(st: tauri::State<'_, Mutex<SessionState>>) -> Result<u32, EngineError> {
+    tab_new_inner(&st)
+}
+
+pub fn tab_new_inner(st: &Mutex<SessionState>) -> Result<u32, EngineError> {
+    let mut t = tabs()?;
+    let ts = t.as_mut().unwrap();
+    let mut g = lock(st)?;
+    let id = ts.next;
+    ts.next += 1;
+    let current = std::mem::take(&mut *g);
+    ts.parked.insert(ts.active, current);
+    ts.active = id;
+    Ok(id)
+}
+
+/// Make tab `id` the active session.
+#[tauri::command]
+pub fn tab_switch(st: tauri::State<'_, Mutex<SessionState>>, id: u32) -> Result<u32, EngineError> {
+    tab_switch_inner(&st, id)
+}
+
+pub fn tab_switch_inner(st: &Mutex<SessionState>, id: u32) -> Result<u32, EngineError> {
+    let mut t = tabs()?;
+    let ts = t.as_mut().unwrap();
+    if id == ts.active {
+        return Ok(id);
+    }
+    let target = ts.parked.remove(&id).ok_or_else(|| EngineError::new(ErrorCode::ValidationFailed, format!("no tab {id}")))?;
+    let mut g = lock(st)?;
+    let current = std::mem::replace(&mut *g, target);
+    ts.parked.insert(ts.active, current);
+    ts.active = id;
+    Ok(id)
+}
+
+/// Close tab `id` (the active one is emptied; switch elsewhere first).
+#[tauri::command]
+pub fn tab_close(st: tauri::State<'_, Mutex<SessionState>>, id: u32) -> Result<(), EngineError> {
+    tab_close_inner(&st, id)
+}
+
+pub fn tab_close_inner(st: &Mutex<SessionState>, id: u32) -> Result<(), EngineError> {
+    let mut t = tabs()?;
+    let ts = t.as_mut().unwrap();
+    if id == ts.active {
+        *lock(st)? = SessionState::default();
+    } else {
+        ts.parked.remove(&id);
+    }
+    Ok(())
+}
+
+/// Move pages (1-based, active tab) to the end of tab `to`; both sides undoable.
+#[tauri::command]
+pub fn move_pages_to_tab(st: tauri::State<'_, Mutex<SessionState>>, pages: Vec<u32>, to: u32) -> Result<Vec<PageMeta>, EngineError> {
+    move_pages_to_tab_inner(&st, pages, to)
+}
+
+pub fn move_pages_to_tab_inner(st: &Mutex<SessionState>, pages: Vec<u32>, to: u32) -> Result<Vec<PageMeta>, EngineError> {
+    let mut t = tabs()?;
+    let ts = t.as_mut().unwrap();
+    let mut g = lock(st)?;
+    let src = g.doc.as_ref().ok_or_else(no_doc)?;
+    if pages.is_empty() || pages.len() >= collect_pages(src)?.len() {
+        return Err(EngineError::new(ErrorCode::ValidationFailed, "a document must keep at least one page"));
+    }
+    let moved = extract(src, &pages)?;
+    let target = ts.parked.get_mut(&to).ok_or_else(|| EngineError::new(ErrorCode::ValidationFailed, format!("no tab {to}")))?;
+    if target.doc.is_none() {
+        return Err(EngineError::new(ErrorCode::ValidationFailed, "that tab has no document"));
+    }
+    logged(target, "Pages from another tab", |doc| merge_doc(doc, &moved).map(|_| ()))?;
+    logged(&mut g, "Move pages to another tab", |doc| delete_pages(doc, &pages).map(|_| ()))
+}
+
+// ---------------------------------------------------------------------------
+// OCR: the bundled `stitchup-ocr` helper (Apple Vision, on-device) reads a
+// rendered page image; the lines become an invisible text layer.
+// ---------------------------------------------------------------------------
+
+fn ocr_helper() -> Option<PathBuf> {
+    let mut c = vec![];
+    if let Ok(p) = std::env::var("STITCHUP_OCR") {
+        c.push(PathBuf::from(p));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            c.push(dir.join("stitchup-ocr")); // inside Stitchup.app/Contents/MacOS
+        }
+    }
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    c.push(dev.join("stitchup-ocr-universal-apple-darwin"));
+    c.push(dev.join(format!("stitchup-ocr-{}-apple-darwin", if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" })));
+    c.into_iter().find(|p| p.is_file())
+}
+
+/// Recognise the text on one page image (PNG/JPEG, base64). Does not change the document.
+#[tauri::command]
+pub fn ocr_recognize(b64: String, languages: Option<String>) -> Result<Vec<stitchup_core::ocr::OcrLine>, EngineError> {
+    let helper = ocr_helper().ok_or_else(|| EngineError::new(ErrorCode::Unsupported, "the text-recognition helper is missing from this build"))?;
+    let bytes = B64.decode(b64.as_bytes()).map_err(|e| EngineError::new(ErrorCode::ValidationFailed, format!("bad image data: {e}")))?;
+    let dir = std::env::temp_dir().join("stitchup-ocr");
+    std::fs::create_dir_all(&dir)?;
+    let img = dir.join(format!("page-{}-{}.png", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    std::fs::write(&img, &bytes)?;
+    let mut cmd = std::process::Command::new(helper);
+    cmd.arg(&img);
+    if let Some(l) = languages.filter(|l| !l.trim().is_empty()) {
+        cmd.arg(l);
+    }
+    let out = cmd.output();
+    let _ = std::fs::remove_file(&img);
+    let out = out?;
+    if !out.status.success() {
+        return Err(EngineError::new(ErrorCode::IoError, format!("text recognition failed: {}", String::from_utf8_lossy(&out.stderr).trim())));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| EngineError::new(ErrorCode::IoError, format!("text recognition output: {e}")))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OcrPage {
+    pub page: u32,
+    pub rotation: i64,
+    pub lines: Vec<stitchup_core::ocr::OcrLine>,
+}
+
+/// Write recognised lines into the pages as invisible text — one undo step.
+#[tauri::command]
+pub fn ocr_apply(st: tauri::State<'_, Mutex<SessionState>>, pages: Vec<OcrPage>) -> Result<Vec<PageMeta>, EngineError> {
+    ocr_apply_inner(&st, pages)
+}
+
+pub fn ocr_apply_inner(st: &Mutex<SessionState>, pages: Vec<OcrPage>) -> Result<Vec<PageMeta>, EngineError> {
+    let mut g = lock(st)?;
+    logged(&mut g, "Recognize text", |doc| {
+        for p in &pages {
+            stitchup_core::ocr::add_text_layer(doc, p.page, p.rotation, &p.lines)?;
+        }
+        Ok(())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Crash recovery: unsaved documents are snapshotted into a private folder
+// (never over the user's files); a clean exit removes them. After a crash the
+// next launch offers them back.
+// ---------------------------------------------------------------------------
+
+pub static RECOVERY_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn recovery_dir() -> Result<PathBuf, EngineError> {
+    let d = RECOVERY_DIR
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| std::env::temp_dir().join("stitchup-recovery"));
+    std::fs::create_dir_all(&d)?;
+    Ok(d)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryEntry {
+    pub file: String,
+    pub name: String,
+    pub original_path: Option<String>,
+    pub saved_at: u64,
+    pub pid: u32,
+}
+
+fn manifest_path(dir: &std::path::Path, pid: u32) -> PathBuf {
+    dir.join(format!("recovery-{pid}.json"))
+}
+
+fn session_name(g: &SessionState) -> (String, Option<String>) {
+    match &g.path {
+        Some(p) if !g.untitled => (
+            p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document.pdf".into()),
+            Some(p.to_string_lossy().into_owned()),
+        ),
+        _ => ("Untitled.pdf".into(), None),
+    }
+}
+
+/// Snapshot every tab with unsaved changes; returns how many were written.
+#[tauri::command]
+pub fn save_recovery(st: tauri::State<'_, Mutex<SessionState>>) -> Result<usize, EngineError> {
+    save_recovery_inner(&st)
+}
+
+pub fn save_recovery_inner(st: &Mutex<SessionState>) -> Result<usize, EngineError> {
+    let dir = recovery_dir()?;
+    let pid = std::process::id();
+    let t = tabs()?;
+    let g = lock(st)?;
+    let mut sessions: Vec<(u32, &SessionState)> = vec![(t.as_ref().unwrap().active, &*g)];
+    for (id, s) in t.as_ref().unwrap().parked.iter() {
+        sessions.push((*id, s));
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut entries = vec![];
+    for (id, s) in sessions {
+        let Some(doc) = s.doc.as_ref() else { continue };
+        if !s.dirty() {
+            continue; // nothing unsaved worth keeping
+        }
+        let mut bytes = Vec::new();
+        doc.clone().save_to(&mut bytes).map_err(|e| EngineError::new(ErrorCode::IoError, e.to_string()))?;
+        let file = dir.join(format!("rec_{pid}_{id}.pdf"));
+        write_atomic(&file, &bytes)?;
+        let (name, original_path) = session_name(s);
+        entries.push(RecoveryEntry { file: file.to_string_lossy().into_owned(), name, original_path, saved_at: now, pid });
+    }
+    // Drop this process's snapshots that are no longer needed.
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path().to_string_lossy().into_owned();
+            if p.contains(&format!("rec_{pid}_")) && !entries.iter().any(|x| x.file == p) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let n = entries.len();
+    if n == 0 {
+        let _ = std::fs::remove_file(manifest_path(&dir, pid));
+    } else {
+        write_atomic(&manifest_path(&dir, pid), serde_json::to_vec_pretty(&entries).unwrap_or_default().as_slice())?;
+    }
+    Ok(n)
+}
+
+/// Clean exit / everything saved: remove this process's snapshots.
+#[tauri::command]
+pub fn clear_recovery() -> Result<(), EngineError> {
+    let dir = recovery_dir()?;
+    let pid = std::process::id();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(&format!("rec_{pid}_")) || n == format!("recovery-{pid}.json") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// Snapshots left behind by a Stitchup that crashed or was killed.
+#[tauri::command]
+pub fn list_recovery() -> Result<Vec<RecoveryEntry>, EngineError> {
+    let dir = recovery_dir()?;
+    let me = std::process::id();
+    let mut out = vec![];
+    for e in std::fs::read_dir(&dir)?.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = n.strip_prefix("recovery-").and_then(|r| r.strip_suffix(".json")).and_then(|p| p.parse::<u32>().ok()) else { continue };
+        if pid == me || process_alive(pid) {
+            continue;
+        }
+        if let Ok(list) = serde_json::from_slice::<Vec<RecoveryEntry>>(&std::fs::read(e.path())?) {
+            out.extend(list.into_iter().filter(|x| std::path::Path::new(&x.file).exists()));
+        }
+    }
+    Ok(out)
+}
+
+/// Open a recovered snapshot as a new, unsaved document in the active tab.
+#[tauri::command]
+pub fn restore_recovery(st: tauri::State<'_, Mutex<SessionState>>, file: String) -> Result<OpenPayload, EngineError> {
+    restore_recovery_inner(&st, file)
+}
+
+pub fn restore_recovery_inner(st: &Mutex<SessionState>, file: String) -> Result<OpenPayload, EngineError> {
+    let dir = recovery_dir()?;
+    let p = PathBuf::from(&file);
+    if p.parent() != Some(dir.as_path()) {
+        return Err(EngineError::new(ErrorCode::PermissionDenied, "not a recovery file"));
+    }
+    let payload = combine_documents_inner(st, vec![file.clone()])?;
+    let _ = std::fs::remove_file(&p);
+    Ok(payload)
+}
+
+/// Forget all leftover snapshots from crashed sessions.
+#[tauri::command]
+pub fn discard_recovery() -> Result<(), EngineError> {
+    let dir = recovery_dir()?;
+    let me = std::process::id();
+    for e in std::fs::read_dir(&dir)?.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        let pid = n
+            .strip_prefix("recovery-")
+            .and_then(|r| r.strip_suffix(".json"))
+            .or_else(|| n.strip_prefix("rec_").and_then(|r| r.split('_').next()))
+            .and_then(|p| p.parse::<u32>().ok());
+        if let Some(pid) = pid {
+            if pid != me && !process_alive(pid) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Frontend diagnostics → stderr (visible when launched from a terminal).

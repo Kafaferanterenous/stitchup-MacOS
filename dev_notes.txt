@@ -1003,3 +1003,24 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
 - UI: FormLayer (fields over widgets), Content ▸ Image tool, readable radio labels (/Opt).
 - tests/ui/readme-shots.mjs: README screenshots from the real UI + backend (demo PDF, own text).
 - TESTS: core 49, command layer 9, e2e 66/66.
+
+2026-11-14 — v0.6.0: TABS + CRASH RECOVERY + SETTINGS + MULTIPLE SIGNATURES + OCR
+- Tabs (A6/C4): backend keeps one SessionState per tab (static TabStore; active session in the
+  managed state, others parked); tab_new/switch/close, move_pages_to_tab. Frontend parks each tab's
+  UI slice (page, zoom, view, selection). Drop-on-tab uses the real pointer position (dnd-kit's
+  delta ignores list auto-scroll) and elementsFromPoint (the dragged thumb is on top).
+- Recovery (B8): save_recovery writes rec_<pid>_<tab>.pdf + recovery-<pid>.json into the app data
+  folder (never over user files); list_recovery only offers files from processes that are gone
+  (kill -0); clean quit / window close clears them. SessionState.saved_ops tracks the saved point.
+- Settings (⌘,): recovery interval, opening zoom, sidebar, colour scheme (localStorage).
+- Quit (⌘Q) and window close ask when any tab is unsaved (onCloseRequested).
+- Signatures: sign_bytes signs a file's exact bytes as an lopdf IncrementalDocument; used when the
+  open document is unchanged since it was opened/saved and the disk file still matches its hash.
+- OCR (G1): packaging/ocr/main.swift (VNRecognizeTextRequest, accurate, language correction),
+  universal, deployment target 10.13 (recognition needs 10.15 at run time), bundled via Tauri
+  externalBin. Page rendered by pdf.js at 300 dpi (displayed rotation) → helper → core/src/ocr.rs
+  writes Helvetica text in render mode 3, horizontally scaled (Tz) to the recognised box; rotation
+  mapped back to user space.
+- Tests: e2e viewport 1280×960 (drag-reorder test needed the room).
+- TESTS: core 45 (ocr 2 and a third sign test new), command layer 9, e2e 74/74 (tabs, recovery after a SIGKILLed
+  backend, quit prompt, settings, double signature verified by OpenSSL, OCR with real Vision).

@@ -193,9 +193,13 @@ async function openViaRibbon(file) {
   await pick(file);
   await tab("Document");
   await rb("open").click();
-  await page.waitForFunction(() => window.__calls.filter((c) => c === "open_document").length > window.__opened);
+  // Either the file loads, or (already open) its tab becomes active.
+  await page.waitForFunction(
+    (p) => window.__calls.filter((c) => c === "open_document").length > window.__opened || document.querySelector(".doc-tab.active")?.title === p,
+    file,
+  );
   await page.waitForFunction(() => !document.querySelector(".empty-viewer")?.textContent?.includes("Parsing"));
-  await waitStatus(/Page 1 of|password|failed/);
+  await waitStatus(/Page \d+ of|password|failed/);
   await idle();
 }
 
@@ -220,6 +224,23 @@ function contrast(a, b) {
   };
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
   return (x + 0.05) / (y + 0.05);
+}
+
+/** Verify the nth signature of a PDF file with the system OpenSSL. */
+async function verifySignature(file, nth = 0) {
+  const pdf = await readFile(file);
+  const s = pdf.toString("latin1");
+  const at = [...s.matchAll(/\/ByteRange/g)][nth].index;
+  const nums = s.slice(at).match(/\[([^\]]+)\]/)[1].trim().split(/\s+/).map(Number);
+  const data = Buffer.concat([pdf.subarray(0, nums[1]), pdf.subarray(nums[2], nums[2] + nums[3])]);
+  const der = Buffer.from(pdf.subarray(nums[1] + 1, nums[2] - 1).toString("latin1"), "hex");
+  const len = der[1] < 0x80 ? 2 + der[1] : 2 + (der[1] & 0x7f) + [...der.subarray(2, 2 + (der[1] & 0x7f))].reduce((a, b) => a * 256 + b, 0);
+  const sig = path.join(WORK, `sig${nth}.der`);
+  const dat = path.join(WORK, `sig${nth}.data`);
+  await writeFile(sig, der.subarray(0, len));
+  await writeFile(dat, data);
+  execFileSync("openssl", ["smime", "-verify", "-binary", "-inform", "DER", "-noverify", "-purpose", "any", "-in", sig, "-content", dat, "-out", "/dev/null"], { stdio: "pipe" });
+  return nums;
 }
 
 /** Annotation subtypes on a page of the CURRENT in-memory document. */
@@ -285,11 +306,13 @@ await makePdf(OTHER, [LETTER, LETTER]);
 
 const bridgeBin = path.join(APP, "src-tauri", "target", "release", "examples", "dev_bridge");
 assert(existsSync(bridgeBin), "build the bridge first: cargo build --release --example dev_bridge");
-const bridge = spawn(bridgeBin, [String(PORT), path.join(APP, "dist")], { stdio: ["ignore", "pipe", "inherit"] });
+const RECOVERY = path.join(WORK, "recovery");
+const bridgeEnv = { ...process.env, STITCHUP_RECOVERY_DIR: RECOVERY };
+const bridge = spawn(bridgeBin, [String(PORT), path.join(APP, "dist")], { stdio: ["ignore", "pipe", "inherit"], env: bridgeEnv });
 await new Promise((res) => bridge.stdout.once("data", res));
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 960 }, deviceScaleFactor: 1 });
 await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
 page = await ctx.newPage();
 const consoleErrors = [];
@@ -897,6 +920,80 @@ await check("Security ▸ Sign: place a signature box; OpenSSL verifies the sign
 });
 
 
+await check("signing an already-signed PDF adds a second signature; both stay valid", async () => {
+  const first = path.join(WORK, "signed.pdf");
+  await openViaRibbon(first);
+  await tab("Security");
+  await rb("sign").click();
+  await page.getByLabel("Signer name").fill("Anna Nowak");
+  await page.getByLabel("Visible signature").uncheck();
+  const second = path.join(WORK, "signed-twice.pdf");
+  await pick(second);
+  await btn("Sign & Save As…").click();
+  await waitNotice(/Signed by Anna Nowak/);
+  const firstBytes = await readFile(first);
+  const both = await readFile(second);
+  assert(Buffer.compare(both.subarray(0, firstBytes.length), firstBytes) === 0, "first revision kept byte-for-byte");
+  await verifySignature(second, 0);
+  const n = await verifySignature(second, 1);
+  assert(n[2] + n[3] === both.length, "second signature covers the whole file");
+  await page.locator(".doc-tab", { hasText: "main.pdf" }).click();
+  await waitStatus(/main\.pdf/);
+  openPath = MAIN;
+});
+
+await check("Content ▸ OCR makes a scanned (image-only) page searchable; Undo removes the layer", async () => {
+  // A "scan": text rendered to a bitmap, embedded as the only page content.
+  const png = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 1700;
+    c.height = 2200;
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = "#111";
+    g.font = "bold 80px Helvetica";
+    g.fillText("Scanned Invoice 4711", 160, 300);
+    g.font = "48px Times New Roman";
+    g.fillText("Payment due within thirty days.", 160, 460);
+    return c.toDataURL("image/png").split(",")[1];
+  });
+  const doc = await PDFDocument.create();
+  const img = await doc.embedPng(Buffer.from(png, "base64"));
+  doc.addPage([612, 792]).drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
+  const scan = path.join(WORK, "scan.pdf");
+  await writeFile(scan, await doc.save());
+  await openViaRibbon(scan);
+  assert(!(await pdfText(scan)).join(" ").trim(), "fixture has no text");
+  await tab("Content");
+  await rb("ocr").click();
+  await page.getByRole("menuitem", { name: "Pages Without Text" }).click();
+  await waitStatus(/Recognised \d+ lines? on 1 page/, 60000);
+  await idle();
+  await page.getByLabel("Find text").fill("4711");
+  await page.getByLabel("Find text").press("Enter");
+  await page.waitForTimeout(1500);
+  const dbg = await page.evaluate(() => ({ hits: window.__stitchup.state().searchHits, toast: document.querySelector(".notice-toast")?.textContent, st: document.querySelector(".search-status")?.textContent }));
+  assert(/1\/1/.test(dbg.st ?? ""), JSON.stringify(dbg));
+  await page.getByLabel("Find text").fill("");
+  // Saved file has the text layer (and still looks the same: render mode 3).
+  const out = path.join(WORK, "scan-ocr.pdf");
+  await pick(out);
+  await tab("Document");
+  await rb("saveAs").click();
+  await waitNotice(/Saved/);
+  const text = (await pdfText(out)).join(" ");
+  assert(/Invoice/.test(text) && /4711/.test(text) && /thirty/.test(text), `recognised: ${text}`);
+  await page.locator(".viewer-scroll").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Meta+z");
+  await waitStatus(/Undid/);
+  const st = await page.evaluate(() => window.__stitchup.state().doc.pages.length);
+  assert(st === 1, "still one page");
+  await page.locator(".doc-tab", { hasText: "main.pdf" }).click();
+  await waitStatus(/main\.pdf/);
+  openPath = MAIN;
+});
+
 await check("every button on every ribbon tab is live with a document open", async () => {
   const needsSelection = new Set(["objDelete", "recolor", "font"]);
   const dead = [];
@@ -1267,6 +1364,79 @@ await check("⌘O opens the file dialog", async () => {
   await waitStatus(/Page 1 of 2/);
 });
 
+
+// ---- Document tabs
+await check("tabs: each document opens in its own tab and keeps its page and zoom", async () => {
+  const A = path.join(WORK, "tabA.pdf");
+  const B = path.join(WORK, "tabB.pdf");
+  await makePdf(A, [LETTER, LETTER, LETTER]);
+  await makePdf(B, [A5, A5]);
+  await openViaRibbon(A);
+  const tabsBefore = await page.locator(".doc-tab").count();
+  await page.locator('[data-thumb="3"] .thumb').click();
+  await waitStatus(/Page 3 of 3/);
+  await tab("Zoom");
+  await rb("zoom100").click();
+  await openViaRibbon(B);
+  assert((await page.locator(".doc-tab").count()) === tabsBefore + 1, "second tab");
+  assert(/tabB\.pdf/.test(await page.locator(".doc-tab.active").innerText()), "B active");
+  await waitStatus(/Page 1 of 2/);
+  await page.locator(".doc-tab", { hasText: "tabA.pdf" }).click();
+  await waitStatus(/Page 3 of 3/);
+  assert(/Zoom 100%/.test(await status()), `zoom restored: ${await status()}`);
+  // Opening an already-open file switches to its tab.
+  const n = await page.locator(".doc-tab").count();
+  openPath = B;
+  await pick(B);
+  await tab("Document");
+  await rb("open").click();
+  await waitStatus(/Page 1 of 2/);
+  assert((await page.locator(".doc-tab").count()) === n, "no duplicate tab");
+});
+
+await check("tabs: move a page to another tab (context menu and drag onto the tab)", async () => {
+  // B is active (2 pages). Move its page 2 to tab A.
+  await page.locator('[data-page="2"]').click({ button: "right", position: { x: 20, y: 20 } });
+  await page.locator(".context-menu").getByRole("menuitem", { name: "Move Page to “tabA.pdf”" }).click();
+  await waitStatus(/Moved 1 page to “tabA\.pdf”/);
+  assert(/Page \d of 1/.test(await status()), "B now has 1 page");
+  assert(/\*/.test(await page.locator(".doc-tab", { hasText: "tabA.pdf" }).innerText()), "A marked unsaved");
+  await page.locator(".doc-tab", { hasText: "tabA.pdf" }).click();
+  await waitStatus(/of 4/);
+  // Drag A's first thumbnail onto tab B.
+  const thumb = page.locator('[data-thumb="1"] .thumb');
+  await thumb.scrollIntoViewIfNeeded();
+  const a = await thumb.boundingBox();
+  const t = await page.locator(".doc-tab", { hasText: "tabB.pdf" }).boundingBox();
+  await page.mouse.move(a.x + a.width / 2, a.y + 30);
+  await page.mouse.down();
+  for (let i = 1; i <= 16; i++) await page.mouse.move(a.x + a.width / 2 + ((t.x + 20 - a.x - a.width / 2) * i) / 16, a.y + 30 + ((t.y + t.height / 2 - a.y - 30) * i) / 16);
+  await page.mouse.up();
+  await waitStatus(/Moved 1 page to “tabB\.pdf”/);
+  assert(/of 3/.test(await status()), "A back to 3 pages");
+  await page.locator(".doc-tab", { hasText: "tabB.pdf" }).click();
+  await waitStatus(/of 2/);
+});
+
+await check("tabs: closing an unsaved tab asks; Cancel keeps it, Close removes it; ⌘T / ⌃Tab", async () => {
+  const n = await page.locator(".doc-tab").count();
+  await pick("Cancel"); // the ask dialog returns the clicked button's label
+  await page.locator(".doc-tab.active .doc-tab-close").click();
+  await page.waitForTimeout(300);
+  assert((await page.locator(".doc-tab").count()) === n, "Cancel keeps the tab");
+  await pick("Close");
+  await page.locator(".doc-tab.active .doc-tab-close").click();
+  await page.waitForFunction((c) => document.querySelectorAll(".doc-tab").length === c - 1, n);
+  await page.locator(".viewer-scroll").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Meta+t");
+  await page.waitForFunction((c) => document.querySelectorAll(".doc-tab").length === c, n);
+  assert((await page.locator(".doc-tab.active").innerText()).startsWith("New Tab"), "⌘T opens an empty tab");
+  const before = await page.locator(".doc-tab.active").innerText();
+  await page.keyboard.press("Control+Tab");
+  await page.waitForTimeout(300);
+  assert((await page.locator(".doc-tab.active").innerText()) !== before, "⌃Tab switches");
+});
+
 // ---- Robustness fixtures (generated by the Rust core)
 await check("password-protected PDF: prompt, wrong password, right password", async () => {
   const f = path.join(FIX, "F-04_encrypted.pdf");
@@ -1298,7 +1468,7 @@ await check("malformed PDF shows an error and the app stays usable", async () =>
   await page.waitForSelector(".error-toast");
   await page.getByRole("button", { name: "Dismiss" }).click();
   await openViaRibbon(MAIN);
-  assert(/Page 1 of 4/.test(await status()), `good file opens after a bad one: ${await status()}`);
+  assert(/of 4/.test(await status()), `good file opens after a bad one: ${await status()}`);
 });
 
 await check("XFA warning badge and Attachments list + save", async () => {
@@ -1341,6 +1511,63 @@ if (existsSync(REAL)) {
     await rb("editText").click();
   });
 }
+
+
+// ---- Settings, quit warning, crash recovery (last: it restarts the backend)
+await check("Settings (⌘,): recovery interval, opening zoom and colour scheme are saved", async () => {
+  await page.locator(".viewer-scroll").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Meta+,");
+  await page.getByLabel("Crash-recovery snapshots").selectOption("30");
+  await page.getByLabel("Opening zoom").selectOption("fit-page");
+  await page.getByLabel("Colour scheme").selectOption("pastel");
+  await btn("Save").click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("stitchup.settings")));
+  assert(saved.recoverySeconds === 30 && saved.openZoom === "fit-page", JSON.stringify(saved));
+  assert((await page.evaluate(() => document.documentElement.dataset.theme)) === "pastel", "scheme applied");
+  await page.evaluate(() => window.__stitchup.theme("light-grey"));
+});
+
+await check("quitting with unsaved changes asks first (Cancel keeps running)", async () => {
+  const f = path.join(WORK, "quit.pdf");
+  await makePdf(f, [LETTER, LETTER]);
+  await openViaRibbon(f);
+  await tab("Pages");
+  await rb("rotateCw").click();
+  await waitStatus(/rotation/);
+  const before = await calls("quit_app");
+  await pick("Cancel");
+  await page.locator(".viewer-scroll").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Meta+q");
+  await page.waitForTimeout(400);
+  assert((await calls("quit_app")) === before, "quit without asking");
+  await pick("Discard and Quit");
+  await page.keyboard.press("Meta+q");
+  await page.waitForFunction((b) => window.__calls.filter((c) => c === "quit_app").length > b, before);
+});
+
+await check("crash recovery: snapshot → backend killed → relaunch offers the document back", async () => {
+  assert((await ipc("save_recovery")) >= 1, "snapshot written");
+  bridge.kill("SIGKILL"); // crash
+  await new Promise((r) => setTimeout(r, 300));
+  const PORT2 = PORT + 300;
+  const bridge2 = spawn(bridgeBin, [String(PORT2), path.join(APP, "dist")], { stdio: ["ignore", "pipe", "inherit"], env: bridgeEnv });
+  await new Promise((res) => bridge2.stdout.once("data", res));
+  try {
+    await page.goto(`http://127.0.0.1:${PORT2}`);
+    await page.waitForSelector("text=Recover unsaved documents?", { timeout: 10000 });
+    assert((await page.locator(".recovery-list").innerText()).includes("quit.pdf"), "lists the crashed document");
+    await btn("Recover").click();
+    const recoveredTab = page.locator(".doc-tab", { hasText: "quit (recovered).pdf" });
+    await recoveredTab.waitFor({ timeout: 10000 });
+    await recoveredTab.click();
+    await waitStatus(/of 2/);
+    const st = await page.evaluate(() => window.__stitchup.state().doc.pages.map((p) => p.rotation));
+    assert(st[0] === 90, `the unsaved rotation came back: ${st}`);
+    assert((await readdir(RECOVERY)).filter((f) => f.startsWith("rec_")).length === 0, "snapshots cleaned up after recovery");
+  } finally {
+    bridge2.kill();
+  }
+});
 
 await check("no uncaught errors in the page", async () => {
   assert(consoleErrors.length === 0, consoleErrors.join(" | "));

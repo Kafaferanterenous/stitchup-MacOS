@@ -174,8 +174,32 @@ function PagesContent() {
       ?.scrollIntoView({ block: "nearest" });
   }, [app.currentPage]);
 
+  // Where the pointer really is (dnd-kit's delta ignores list auto-scroll).
+  const lastPointer = useRef<[number, number]>([0, 0]);
+  useEffect(() => {
+    const track = (e: PointerEvent) => (lastPointer.current = [e.clientX, e.clientY]);
+    window.addEventListener("pointermove", track, true);
+    return () => window.removeEventListener("pointermove", track, true);
+  }, []);
+
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
+    // Dropped on another document tab → move the page(s) there.
+    const [px, py] = lastPointer.current;
+    {
+      // The dragged thumbnail itself is under the pointer: look through it.
+      const tabEl = document
+        .elementsFromPoint(px, py)
+        .map((el) => el.closest<HTMLElement>("[data-tab-id]"))
+        .find((el) => el);
+      const to = tabEl ? Number(tabEl.dataset.tabId) : null;
+      if (to !== null && to !== app.activeTab) {
+        const dragged = Number(active.id);
+        const pages = sel.includes(dragged) && sel.length > 1 ? sel : [dragged];
+        void store.movePagesToTab(pages, to);
+        return;
+      }
+    }
     if (!over || active.id === over.id) return;
     const next = arrayMove(order, order.indexOf(Number(active.id)), order.indexOf(Number(over.id)));
     setPendingOrder(next);

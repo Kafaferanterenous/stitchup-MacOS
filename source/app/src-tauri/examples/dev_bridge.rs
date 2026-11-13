@@ -85,6 +85,17 @@ fn dispatch(st: &Mutex<SessionState>, cmd: &str, a: &Value) -> Result<Value, Val
         "set_field" => go!(set_field_inner(st, arg(a, "name").map_err(bad)?, arg(a, "value").map_err(bad)?)),
         "insert_image" => go!(insert_image_inner(st, arg(a, "page").map_err(bad)?, arg(a, "rect").map_err(bad)?, arg(a, "image").map_err(bad)?)),
         "read_image_file" => go!(read_image_file(arg(a, "path").map_err(bad)?)),
+        "tab_new" => go!(tab_new_inner(st)),
+        "tab_switch" => go!(tab_switch_inner(st, arg(a, "id").map_err(bad)?)),
+        "tab_close" => go!(tab_close_inner(st, arg(a, "id").map_err(bad)?)),
+        "move_pages_to_tab" => go!(move_pages_to_tab_inner(st, arg(a, "pages").map_err(bad)?, arg(a, "to").map_err(bad)?)),
+        "ocr_recognize" => go!(ocr_recognize(arg(a, "b64").map_err(bad)?, arg(a, "languages").ok())),
+        "ocr_apply" => go!(ocr_apply_inner(st, arg(a, "pages").map_err(bad)?)),
+        "save_recovery" => go!(save_recovery_inner(st)),
+        "clear_recovery" => go!(clear_recovery()),
+        "list_recovery" => go!(list_recovery()),
+        "restore_recovery" => go!(restore_recovery_inner(st, arg(a, "file").map_err(bad)?)),
+        "discard_recovery" => go!(discard_recovery()),
         "sign_document" => go!(sign_document_inner(st, arg(a, "target").map_err(bad)?, arg(a, "spec").map_err(bad)?)),
         other => Err(bad(format!("unknown command {other}"))),
     }
@@ -161,6 +172,9 @@ fn main() {
     let port: u16 = a.next().and_then(|p| p.parse().ok()).unwrap_or(1430);
     let dist = Arc::new(PathBuf::from(a.next().unwrap_or_else(|| "../dist".into())));
     let st = Arc::new(Mutex::new(SessionState::default()));
+    if let Ok(dir) = std::env::var("STITCHUP_RECOVERY_DIR") {
+        *RECOVERY_DIR.lock().unwrap() = Some(PathBuf::from(dir));
+    }
     let l = TcpListener::bind(("127.0.0.1", port)).expect("bind");
     println!("dev_bridge listening on http://127.0.0.1:{port}");
     for c in l.incoming().flatten() {

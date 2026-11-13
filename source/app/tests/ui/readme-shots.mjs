@@ -136,6 +136,38 @@ await page.waitForTimeout(1500);
 await shot("print-pastel-3.png");
 await page.keyboard.press("Escape");
 
+// 6. Tabs + OCR on a scanned page (Pastel 2)
+await theme("pastel-2");
+const scanPng = await page.evaluate(() => {
+  const c = document.createElement("canvas");
+  c.width = 1275;
+  c.height = 1650;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fbfaf6";
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = "#222";
+  g.font = "bold 54px Helvetica";
+  g.fillText("Delivery note 2026-118", 110, 200);
+  g.font = "34px Times New Roman";
+  ["Received in good condition.", "12 boxes, 3 pallets.", "Signed at the gate, 08:40."].forEach((t, i) => g.fillText(t, 110, 320 + i * 60));
+  return c.toDataURL("image/png").split(",")[1];
+});
+const scanDoc = await PDFDocument.create();
+const scanImg = await scanDoc.embedPng(Buffer.from(scanPng, "base64"));
+scanDoc.addPage([612, 792]).drawImage(scanImg, { x: 0, y: 0, width: 612, height: 792 });
+const scanFile = path.join(WORK, "scan.pdf");
+await writeFile(scanFile, await scanDoc.save());
+await page.evaluate((p) => window.__dialog.push(p), scanFile);
+await run("open");
+await page.waitForSelector(".doc-tab:nth-child(2)");
+await settle();
+await run("fitPage");
+await tab("Content");
+await page.locator('[data-cmd="ocr"]').click();
+await settle();
+await shot("tabs-ocr-pastel-2.png");
+await page.keyboard.press("Escape");
+
 await browser.close();
 bridge.kill();
 console.log(`screenshots → ${OUT}`);

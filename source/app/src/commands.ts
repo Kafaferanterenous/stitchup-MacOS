@@ -205,6 +205,11 @@ export const COMMANDS: Command[] = [
   { id: "mergePdfs", label: "Merge", menu: "Merge PDFs…", tip: "Append one or more PDFs to this document", icon: "merge", enabled: hasDoc, run: mergeMany },
   { id: "combineNew", label: "Combine", menu: "Combine into New…", tip: "Combine several PDFs into a new document", icon: "merge", run: combineNew },
   { id: "compress", label: "Compress", menu: "Compress PDF…", tip: "Save a smaller copy (unused data removed, streams compressed)", icon: "compress", enabled: hasDoc, run: compress },
+  { id: "settings", label: "Settings", menu: "Settings…", tip: "Crash recovery, opening zoom, sidebar (⌘,)", icon: "info", accel: "CmdOrCtrl+,", run: () => store.setDialog("settings") },
+  { id: "newTab", label: "New Tab", tip: "Open an empty tab (⌘T)", icon: "new", accel: "CmdOrCtrl+T", run: () => store.newTab() },
+  { id: "closeTab", label: "Close Tab", tip: "Close this tab (⌘W)", icon: "exit", accel: "CmdOrCtrl+W", run: () => store.closeTab(getState().activeTab) },
+  { id: "nextTab", label: "Next Tab", tip: "Next tab (⌃Tab)", icon: "next", accel: "Ctrl+Tab", enabled: (s) => s.tabs.length > 1, run: () => store.cycleTab(1) },
+  { id: "prevTab", label: "Previous Tab", tip: "Previous tab (⌃⇧Tab)", icon: "prev", accel: "Ctrl+Shift+Tab", enabled: (s) => s.tabs.length > 1, run: () => store.cycleTab(-1) },
   { id: "exit", label: "Exit", menu: "Quit Stitchup", tip: "Quit (⌘Q)", icon: "exit", accel: "CmdOrCtrl+Q", run: () => store.exitApp() },
 
   // ------------------------------------------------------------------- Pages
@@ -252,6 +257,12 @@ export const COMMANDS: Command[] = [
   { id: "fore", label: "Fore", tip: "Foreground colour: text colour and shape outline", icon: "palette", tab: "Content", swatch: "fore", run: () => {} },
   { id: "back", label: "Back", tip: "Background colour: fill used by new shapes (right-click for no fill)", icon: "palette", tab: "Content", swatch: "back", run: () => {} },
   { id: "image", label: "Image", menu: "Insert Image…", tip: "Insert a picture (PNG, JPEG, GIF, WebP, HEIC…): choose it, then click or drag on the page", icon: "image", tab: "Content", enabled: hasDoc, active: isTool("image"), run: insertImage },
+  { id: "ocr", label: "OCR", menu: "Recognize Text (OCR)", tip: "Make scanned pages searchable: recognise their text on this Mac (Apple Vision) and add it as an invisible layer", icon: "find", tab: "Content", enabled: hasDoc,
+    choices: () => [
+      { label: "Pages Without Text", run: () => void store.recognizeText("untexted") },
+      { label: "This Page", run: () => void store.recognizeText("current") },
+      { label: "All Pages", run: () => void store.recognizeText("all") },
+    ], run: () => {} },
   { id: "shapes", label: "Shapes", tip: "Insert a vector shape into the page content; click for a default size or drag", icon: "shape", tab: "Content", enabled: hasDoc,
     active: (s) => (s.tool ?? "").startsWith("shape-"), choices: shapeChoices("shape-"), run: () => {} },
 
@@ -331,7 +342,7 @@ export function matchesKey(e: KeyboardEvent, spec: string): boolean {
   const parts = spec.split("+");
   const key = parts.pop()!;
   const want = {
-    cmd: parts.some((p) => p === "CmdOrCtrl" || p === "Meta" || p === "Control" || p === "Cmd"),
+    cmd: parts.some((p) => p === "CmdOrCtrl" || p === "Meta" || p === "Control" || p === "Ctrl" || p === "Cmd"),
     shift: parts.includes("Shift"),
     alt: parts.includes("Alt"),
   };
@@ -339,6 +350,7 @@ export function matchesKey(e: KeyboardEvent, spec: string): boolean {
   const k = e.key;
   if (key === "=") return k === "=" || k === "+";
   if (key === "-") return k === "-" || k === "_";
+  if (key === ",") return k === ",";
   if (key === "Up") return k === "ArrowUp";
   if (key === "Down") return k === "ArrowDown";
   return k.toLowerCase() === key.toLowerCase();
@@ -346,9 +358,9 @@ export function matchesKey(e: KeyboardEvent, spec: string): boolean {
 
 /** Menu bar layout (same menus as the Windows build). */
 export const MENUS: { title: string; items: (string | "-" | { submenu: string })[] }[] = [
-  { title: "File", items: ["new", "open", "-", "save", "saveAs", "encrypt", "import", "mergePdfs", "combineNew", "compress", "watermark", "sign", "properties", "attachments", "-", "print", "printPreview", "printPdf"] },
+  { title: "File", items: ["new", "open", "newTab", "closeTab", "prevTab", "nextTab", "-", "save", "saveAs", "encrypt", "import", "mergePdfs", "combineNew", "compress", "watermark", "sign", "properties", "attachments", "-", "print", "printPreview", "printPdf", "-", "settings"] },
   { title: "Export", items: ["exportText", "exportCsv", "exportImages", "exportRtf", "exportDocx", "exportOdt"] },
-  { title: "Edit", items: ["undo", "redo", "-", { submenu: "clipboard" }, "-", "find", "findNext", "findPrev", "-", "rotateCw", "rotateCcw", "rotateAll", "delete", "addPage", "-", "selectAll", "-", "select", "editText", "objDelete", "recolor", "font", "image", "shapes"] },
+  { title: "Edit", items: ["undo", "redo", "-", { submenu: "clipboard" }, "-", "find", "findNext", "findPrev", "-", "rotateCw", "rotateCcw", "rotateAll", "delete", "addPage", "-", "selectAll", "-", "select", "editText", "objDelete", "recolor", "font", "image", "shapes", "ocr"] },
   { title: "Pages", items: ["extract", "split", "autoCrop"] },
   { title: "Annotate", items: ["annHighlight", "annUnderline", "annStrike", "annNote", "annText", "annShape", "annStamp", "annLink", "annRedact", "annPen"] },
   { title: "View", items: ["zoomIn", "zoomOut", "zoom100", "fitWidth", "fitPage", "-", "prev", "next", "-", "spread", "single", "continuous", "sidebar", "-", { submenu: "schemes" }] },
