@@ -182,3 +182,18 @@ export interface OcrLine {
 }
 export const cmdOcrRecognize = (b64: string, languages?: string) => cmd<OcrLine[]>("ocr_recognize", { b64, languages });
 export const cmdOcrApply = (pages: { page: number; rotation: number; lines: OcrLine[] }[]) => cmd<PageMeta[]>("ocr_apply", { pages });
+
+// ---- installed fonts
+export interface SystemFace {
+  family: string;
+  style: string;
+  postscript: string;
+  bold: boolean;
+  italic: boolean;
+  weight: number;
+  monospace: boolean;
+  cyrillic: boolean;
+  greek: boolean;
+  cjk: boolean;
+}
+export const cmdListSystemFonts = () => cmd<SystemFace[]>("list_system_fonts");

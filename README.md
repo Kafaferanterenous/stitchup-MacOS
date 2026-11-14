@@ -14,8 +14,8 @@ replaced when you save.
 | Double-click any line to rewrite it in the document's own font | Fill PDF forms; the values show in Preview and Acrobat too |
 | ![Print dialog with a live preview of each sheet (Pastel 3 scheme)](docs/screenshots/print-pastel-3.png) | ![Empty window with the ribbon tabs (Pastel scheme)](docs/screenshots/empty-pastel.png) |
 | Print preview with paper size and orientation | Nine colour schemes, the same as on Windows |
-| ![Two documents open in tabs; the OCR menu on a scanned page (Pastel 2 scheme)](docs/screenshots/tabs-ocr-pastel-2.png) | |
-| Tabs for open documents; OCR makes scanned pages searchable | |
+| ![Two documents open in tabs; the OCR menu on a scanned page (Pastel 2 scheme)](docs/screenshots/tabs-ocr-pastel-2.png) | ![Editing a line: the format bar and the installed-font picker (Light Grey scheme)](docs/screenshots/fonts-light-grey.png) |
+| Tabs for open documents; OCR makes scanned pages searchable | Any installed font for a line, shown in its own typeface |
 
 ## Download
 
@@ -30,9 +30,11 @@ not notarized. The first time you open it, right-click it and choose
 - **Edit text in place:** double-click a line, or use Content ▸ Edit Text. The
   text is changed in the PDF in the original font. If that font lacks a letter,
   the line is redrawn in the closest standard font, with full Polish and other
-  Central European letters (ą ć ę ł ń ó ś ź ż). While you edit, a bar above
-  the line shows its font and size and lets you change font, bold, italic,
-  size and colour.
+  Central European letters (ą ć ę ł ń ó ś ź ż). Letters no standard font
+  has (Cyrillic, Greek, Chinese, Japanese…) are set in an installed font of
+  the same style. While you edit, a bar above the line shows its font and
+  size and lets you change font, bold, italic, size and colour. Any font
+  installed on your Mac can be used; only the letters used are embedded.
 - **Annotate:** highlight, underline and strike-out snap to the text. Also
   sticky notes, text boxes, shapes (rectangle, oval, line, arrow), stamps,
   links and freehand pen. All are real PDF annotations, so they look the same

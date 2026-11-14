@@ -385,3 +385,8 @@ Notes:
   registration, and the `fs:default` capability) — no fs commands are registered,
   so the grant was dead. The dialog plugin is kept (open/save path pickers).
 - Re-verify each license/NOTICE at the actual pinned version before release.
+- **Update 2026-11-14 (v0.7.0):** added `ttf-parser` 0.25 (MIT / Apache-2.0) and
+  `subsetter` 0.2 (MIT / Apache-2.0; pulls skrifa / read-fonts / write-fonts / kurbo,
+  all MIT / Apache-2.0) to embed installed fonts as subsets; `objc2`, `objc2-app-kit`,
+  `objc2-web-kit`, `objc2-foundation` (MIT) for native print settings (v0.6.1). Fonts are
+  only embedded when their OS/2 fsType allows it.

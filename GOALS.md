@@ -2,7 +2,7 @@
 
 Target: the best all-round PDF editor, at feature and look parity with the
 Windows build (github.com/Kafaferanterenous/stitchup-Win v0.12.28), and ahead of it where macOS allows.
-Updated 2026-11-14 (v0.6.1). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
+Updated 2026-11-14 (v0.7.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
 
 ## A. Look & navigation (same as Windows)
 | # | Goal | Status |
@@ -48,9 +48,9 @@ Updated 2026-11-14 (v0.6.1). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | # | Goal | Status |
 |---|------|--------|
 | E1 | In-place text edit in the original font | ✅ |
-| E2 | Unicode fallback font (Polish ą ł etc. when the original font lacks them) — Central European Latin (Polish ą ł ż…), Baltic, Turkish, Romanian; Cyrillic/Greek/CJK still to do | ✅ |
+| E2 | Unicode fallback font — Central European Latin via standard fonts; Cyrillic, Greek, CJK and any other script via an installed font of the same style (subset-embedded, ToUnicode kept) | ✅ |
 | E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs and images (vector paths not yet selectable); move, delete, marquee, ⌘-click | ✅ |
-| E4 | Recolor, Font & size, Fore/Back colours — colour palettes on Fore / Back / Annotate ▸ Colour (Fore recolours the selection at once); while editing a line a bar shows its real font and size and changes font, bold/italic, size and colour | ✅ |
+| E4 | Recolor, Font & size, Fore/Back colours — colour palettes; while editing a line a bar shows its real font and size; any installed font (searchable picker, names in their own typeface, subset-embedded) or the standard ones; bold/italic also on the original font (same installed family, else nearest standard) | ✅ |
 | E5 | Insert image — PNG (with transparency), JPEG (embedded as-is), GIF/WebP/HEIC/TIFF | ✅ |
 
 ## F. Security & forms

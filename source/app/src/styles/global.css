@@ -1496,3 +1496,70 @@ kbd {
   width: 14px;
   height: 14px;
 }
+
+/* font picker */
+.font-picker {
+  position: relative;
+  display: inline-block;
+}
+.font-picker-button {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.font-picker-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  width: 280px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.font-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.font-picker-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.font-picker-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 14px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+}
+.font-picker-list button:hover,
+.font-picker-list button.on {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+.font-picker-tags {
+  font: 10px -apple-system, Helvetica, sans-serif;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+.font-picker-head {
+  margin: 6px 4px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.6;
+}

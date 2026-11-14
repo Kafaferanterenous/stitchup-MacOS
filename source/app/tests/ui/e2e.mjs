@@ -243,6 +243,13 @@ async function verifySignature(file, nth = 0) {
   return nums;
 }
 
+/** Pick a font in a FontPicker inside `scope` (standard name or installed family). */
+async function chooseFont(scope, name) {
+  await scope.locator(".font-picker-button").click();
+  await page.locator(".font-picker-list").waitFor();
+  await page.locator(".font-picker-list button", { hasText: new RegExp(`^${name}(\\s|$)`) }).first().click();
+}
+
 /** Annotation subtypes on a page of the CURRENT in-memory document. */
 async function annotsOn(pageNo) {
   const data = new Uint8Array(Buffer.from((await ipc("render_bytes")).bytes_b64, "base64"));
@@ -849,7 +856,7 @@ await check("Content ▸ Recolor and Font change the selected text", async () =>
   const b2 = await runBox(4, "The quick brown fox");
   await page.mouse.click(b2.x + 10, b2.y + b2.height / 2);
   await rb("font").click();
-  await page.getByLabel("Font family").selectOption("Times");
+  await chooseFont(page.locator(".modal"), "Times");
   await page.locator(".modal").getByText("Bold").click();
   await page.getByLabel("Font size").fill("18");
   await btn("Apply").click();
@@ -1078,11 +1085,35 @@ await check("editing a line shows its font & size; the bar changes size, colour 
   // Type, then pick a font: the typed text is saved, then the font applied.
   await page.locator(".inline-editor").waitFor();
   await page.locator(".inline-editor").fill("Line two, rewritten");
-  await page.locator(".edit-bar").getByLabel("Font", { exact: true }).selectOption("Times");
+  await chooseFont(page.locator(".edit-bar"), "Times");
   await waitStatus(/Font: Times-Roman/);
   const o = await find("Line two, rewritten");
   assert(o && o.font === "Times-Roman" && o.size === 18 && o.color === "#d0021b", JSON.stringify(o));
+  // Any installed font: search the picker, pick Arial (embedded as a subset).
+  await page.locator(".inline-editor:not(.pending)").waitFor();
+  await page.locator(".edit-bar .font-picker-button").click();
+  await page.getByLabel("Search fonts").fill("Arial");
+  await page.locator(".font-picker-list button").first().click();
+  await waitStatus(/Font: Arial/);
+  let a = await find("Line two, rewritten");
+  assert(a && /^Arial/.test(a.font) && a.size === 18, JSON.stringify(a));
+  // Bold works (in the same installed family).
+  await page.locator(".inline-editor:not(.pending)").waitFor();
+  await page.locator(".edit-bar").getByRole("button", { name: "Bold" }).click();
+  await waitStatus(/Font: Arial-Bold/);
+  a = await find("Line two, rewritten");
+  assert(a && /^Arial-Bold/.test(a.font), JSON.stringify(a));
   await page.locator(".inline-editor").press("Escape");
+  // Letters no standard font has (Cyrillic): an installed font is used, no "?".
+  const fox = page.locator('[data-page="2"] .text-run', { hasText: "The quick brown fox" }).first();
+  await fox.dblclick();
+  await page.locator(".inline-editor:not(.pending)").fill("Съешь же ещё этих мягких булок");
+  await page.locator(".inline-editor").press("Enter");
+  await waitStatus(/Text edited|replaced with/);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-page="2"] .text-run')].some((s) => s.textContent.includes("Съешь")));
+  const cy = (await ipc("list_objects", { page: 2 })).find((x) => x.text.includes("Съешь"));
+  assert(cy && !cy.text.includes("?"), JSON.stringify(cy));
+  await page.locator(".inline-editor").press("Escape").catch(() => {});
   await page.waitForFunction(() => !document.querySelector(".edit-bar"));
   // Close this tab without saving.
   await pick("Close");

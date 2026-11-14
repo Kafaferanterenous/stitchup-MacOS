@@ -64,6 +64,7 @@ pub fn run() {
             commands::tab_switch,
             commands::tab_close,
             commands::move_pages_to_tab,
+            commands::list_system_fonts,
             commands::ocr_recognize,
             commands::ocr_apply,
             commands::save_recovery,
@@ -74,6 +75,10 @@ pub fn run() {
             commands::quit_app,
         ])
         .setup(|app| {
+            // Scan the installed fonts in the background (font picker, fallback).
+            std::thread::spawn(|| {
+                let _ = stitchup_core::fonts::system_faces();
+            });
             // Crash-recovery snapshots live in the app's private data folder.
             if let Ok(dir) = app.path().app_data_dir() {
                 if let Ok(mut d) = commands::RECOVERY_DIR.lock() {

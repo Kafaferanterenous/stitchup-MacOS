@@ -168,6 +168,23 @@ await settle();
 await shot("tabs-ocr-pastel-2.png");
 await page.keyboard.press("Escape");
 
+// 7. Editing a line: format bar + installed-font picker (Light Grey)
+await theme("light-grey");
+await page.locator(".doc-tab", { hasText: "demo.pdf" }).click();
+await page.waitForSelector('[data-page="1"] canvas');
+await run("fitWidth");
+await settle();
+await page.locator('[data-page="1"] .text-run', { hasText: "Highlight, underline, notes" }).first().dblclick();
+await page.locator(".edit-bar").waitFor();
+await page.locator(".edit-bar .font-picker-button").click();
+await page.locator(".font-picker-list button").nth(12).waitFor();
+await page.waitForTimeout(1500);
+await page.locator('[data-page="1"]').evaluate((el) => el.scrollIntoView({ block: "start" }));
+await page.locator(".viewer-scroll").evaluate((el) => (el.scrollTop += 240));
+await settle();
+await shot("fonts-light-grey.png");
+await page.keyboard.press("Escape");
+
 await browser.close();
 bridge.kill();
 console.log(`screenshots → ${OUT}`);

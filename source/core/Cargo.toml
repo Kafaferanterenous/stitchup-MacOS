@@ -19,6 +19,9 @@ der = { version = "0.7", features = ["alloc", "oid"] }
 spki = "0.7"
 const-oid = { version = "0.9", features = ["db"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# Installed (system) fonts: read metrics, subset and embed (MIT / Apache-2.0).
+ttf-parser = "0.25"
+subsetter = "0.2"
 
 [[bin]]
 name = "generate_fixtures"

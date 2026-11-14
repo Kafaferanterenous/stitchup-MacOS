@@ -1,20 +1,14 @@
 //! Format bar shown above a line while it is being edited: the line's real
 //! font, size and colour, and controls to change them (applied to the whole
-//! line; typed text is saved first).
+//! line; typed text is saved first). Any installed font can be chosen.
 
 import { useEffect, useState } from "react";
 import { store, rgb, type FormatOp } from "../../store";
 import type { TextRun } from "../../types";
 import { ColorPalette } from "../common/ColorPalette";
+import { FontPicker, STANDARD, familyOf, fontName, useSystemFonts, type FontChoice } from "../common/FontPicker";
 
-type Family = "original" | "Helvetica" | "Times" | "Courier";
-
-/** Standard-14 font name for a family + style. */
-export function std14Name(family: Exclude<Family, "original">, bold: boolean, italic: boolean): string {
-  if (family === "Times") return bold && italic ? "Times-BoldItalic" : bold ? "Times-Bold" : italic ? "Times-Italic" : "Times-Roman";
-  const sfx = bold && italic ? "-BoldOblique" : bold ? "-Bold" : italic ? "-Oblique" : "";
-  return family + sfx;
-}
+export { std14Name } from "../common/FontPicker";
 
 /** PDF box around a run's baseline (for finding its content objects). */
 export function runBox(run: TextRun, widthScale = 1): [number, number, number, number] {
@@ -24,8 +18,9 @@ export function runBox(run: TextRun, widthScale = 1): [number, number, number, n
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom: number }) {
+  const faces = useSystemFonts();
   const [info, setInfo] = useState<{ font: string; size: number; color: string } | null>(null);
-  const [family, setFamily] = useState<Family>("original");
+  const [family, setFamily] = useState<FontChoice>("original");
   const [bold, setBold] = useState(false);
   const [italic, setItalic] = useState(false);
   const [size, setSize] = useState(String(Math.round(run.fontSize * 10) / 10));
@@ -40,7 +35,7 @@ export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom:
         const font = o.font ?? "";
         setInfo({ font, size: o.size ?? run.fontSize, color: o.color ?? "#000000" });
         setSize(String(o.size ?? Math.round(run.fontSize * 10) / 10));
-        setBold(/bold|black|heavy|semibold/i.test(font));
+        setBold(/bold|black|heavy|semibold|demi/i.test(font));
         setItalic(/italic|oblique/i.test(font));
       },
       () => {},
@@ -54,11 +49,26 @@ export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom:
   const sizeNum = Number(size);
   const sizeOk = Number.isFinite(sizeNum) && sizeNum >= 1 && sizeNum <= 400;
   const sizeChanged = sizeOk && Math.abs(sizeNum - (info?.size ?? run.fontSize)) > 0.05;
-  const fontFor = (f: Family, b: boolean, i: boolean) => (f === "original" ? "" : std14Name(f, b, i));
 
-  function applyFont(f: Family, b: boolean, i: boolean) {
+  /** Family for bold / italic of the ORIGINAL font: the same family if installed, else the closest standard one. */
+  function originalFamily(): FontChoice {
+    const n = info?.font ?? "";
+    const std = STANDARD.find((s) => n.startsWith(s));
+    if (std) return std; // standard PDF fonts stay standard (nothing embedded)
+    const installed = familyOf(faces, n);
+    if (installed) return installed;
+    if (/courier|mono|menlo/i.test(n)) return "Courier";
+    if (/times|serif|georgia|garamond|roman|book|minion|cambria/i.test(n) && !/sans/i.test(n)) return "Times";
+    return "Helvetica";
+  }
+
+  function applyFont(f: FontChoice, b: boolean, i: boolean) {
+    if (f === "original" && (b !== bold || i !== italic)) {
+      f = originalFamily();
+      setFamily(f);
+    }
     if (f === "original" && !sizeChanged) return;
-    apply({ op: "font", family: fontFor(f, b, i), size: sizeChanged ? sizeNum : undefined });
+    apply({ op: "font", family: fontName(faces, f, b, i), size: sizeChanged ? sizeNum : undefined });
   }
 
   const top = run.rect.y * zoom - 40;
@@ -73,26 +83,20 @@ export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom:
       <span className="edit-bar-font" title="The line's font in the PDF">
         {info ? `${info.font || "Unknown font"} · ${info.size} pt` : "…"}
       </span>
-      <select
-        aria-label="Font"
+      <FontPicker
         value={family}
-        onChange={(e) => {
-          const f = e.target.value as Family;
+        allowOriginal
+        onPick={(f) => {
           setFamily(f);
           applyFont(f, bold, italic);
-        }}>
-        <option value="original">Original font</option>
-        <option value="Helvetica">Helvetica</option>
-        <option value="Times">Times</option>
-        <option value="Courier">Courier</option>
-      </select>
+        }}
+      />
       <button
         type="button"
         className={`edit-bar-toggle${bold ? " on" : ""}`}
         aria-pressed={bold}
         aria-label="Bold"
-        title={family === "original" ? "Choose Helvetica, Times or Courier for bold / italic" : "Bold"}
-        disabled={family === "original"}
+        title="Bold"
         onMouseDown={keepFocus}
         onClick={() => {
           setBold(!bold);
@@ -105,8 +109,7 @@ export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom:
         className={`edit-bar-toggle${italic ? " on" : ""}`}
         aria-pressed={italic}
         aria-label="Italic"
-        title={family === "original" ? "Choose Helvetica, Times or Courier for bold / italic" : "Italic"}
-        disabled={family === "original"}
+        title="Italic"
         onMouseDown={keepFocus}
         onClick={() => {
           setItalic(!italic);
@@ -122,7 +125,7 @@ export function EditBar({ run, page, zoom }: { run: TextRun; page: number; zoom:
         onChange={(e) => setSize(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === "Enter" && sizeOk) apply({ op: "font", family: fontFor(family, bold, italic), size: sizeNum });
+          if (e.key === "Enter" && sizeOk) apply({ op: "font", family: fontName(faces, family, bold, italic), size: sizeNum });
         }}
       />
       <span className="edit-bar-unit">pt</span>

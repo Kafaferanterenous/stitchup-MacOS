@@ -89,6 +89,7 @@ fn dispatch(st: &Mutex<SessionState>, cmd: &str, a: &Value) -> Result<Value, Val
         "tab_switch" => go!(tab_switch_inner(st, arg(a, "id").map_err(bad)?)),
         "tab_close" => go!(tab_close_inner(st, arg(a, "id").map_err(bad)?)),
         "move_pages_to_tab" => go!(move_pages_to_tab_inner(st, arg(a, "pages").map_err(bad)?, arg(a, "to").map_err(bad)?)),
+        "list_system_fonts" => go!(Ok::<_, stitchup_core::EngineError>(list_system_fonts())),
         "ocr_recognize" => go!(ocr_recognize(arg(a, "b64").map_err(bad)?, arg(a, "languages").ok())),
         "ocr_apply" => go!(ocr_apply_inner(st, arg(a, "pages").map_err(bad)?)),
         "save_recovery" => go!(save_recovery_inner(st)),
@@ -172,6 +173,9 @@ fn main() {
     let port: u16 = a.next().and_then(|p| p.parse().ok()).unwrap_or(1430);
     let dist = Arc::new(PathBuf::from(a.next().unwrap_or_else(|| "../dist".into())));
     let st = Arc::new(Mutex::new(SessionState::default()));
+    std::thread::spawn(|| {
+        let _ = stitchup_core::fonts::system_faces();
+    });
     if let Ok(dir) = std::env::var("STITCHUP_RECOVERY_DIR") {
         *RECOVERY_DIR.lock().unwrap() = Some(PathBuf::from(dir));
     }

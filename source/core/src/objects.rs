@@ -442,11 +442,18 @@ pub fn set_font(doc: &mut PdfDoc, page_no: u32, ids: &[String], family: &str, si
         store(doc, &pc, ops)?;
         return Ok(n);
     }
-    let base = match family {
+    let std14 = matches!(
+        family,
         "Helvetica" | "Helvetica-Bold" | "Helvetica-Oblique" | "Helvetica-BoldOblique" | "Times-Roman" | "Times-Bold"
-        | "Times-Italic" | "Times-BoldItalic" | "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => family,
-        _ => return Err(crate::err!(ErrorCode::ValidationFailed, "unknown font family {family}")),
+            | "Times-Italic" | "Times-BoldItalic" | "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique"
+    );
+    // Otherwise: an installed font, by PostScript name (embedded as a subset).
+    let system = if std14 {
+        None
+    } else {
+        Some(crate::fonts::find_face(family).ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "font {family} is not installed"))?)
     };
+    let base = family;
     let mut repl = HashMap::new();
     let mut new_fonts: Vec<(Vec<u8>, Object)> = vec![];
     let mut taken: std::collections::HashSet<Vec<u8>> = pc.fonts.keys().cloned().collect();
@@ -455,16 +462,28 @@ pub fn set_font(doc: &mut PdfDoc, page_no: u32, ids: &[String], family: &str, si
             continue;
         }
         let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i && s.decoded) else { continue };
-        let enc = crate::textedit::std14_encode(&s.text);
         let name = (1..).map(|n| format!("StFn{n}").into_bytes()).find(|n| !taken.contains(n)).unwrap();
         taken.insert(name.clone());
-        new_fonts.push((name.clone(), crate::textedit::std14_font(base, &enc.diffs)));
+        let shown = match system {
+            Some(face) => {
+                let e = crate::fonts::embed_text(doc, face, &s.text)?;
+                new_fonts.push((name.clone(), Object::Reference(e.font)));
+                crate::fonts::hex_string(e.bytes)
+            }
+            None => {
+                // Letters the standard font lacks (Cyrillic…) → an installed look-alike.
+                let orig = pc.fonts.get(&s.font).map(|f| f.base_font.clone()).unwrap_or_default();
+                let (font, shown, _, _) = crate::textedit::replacement_font(doc, &orig, base, &s.text);
+                new_fonts.push((name.clone(), font));
+                shown
+            }
+        };
         let mut v = vec![];
         if pc.ops[i].operator == "'" || pc.ops[i].operator == "\"" {
             v.push(Operation::new("T*", vec![]));
         }
         v.push(Operation::new("Tf", vec![Object::Name(name), r(tf_size(s))]));
-        v.push(Operation::new("Tj", vec![Object::String(enc.bytes, StringFormat::Literal)]));
+        v.push(Operation::new("Tj", vec![shown]));
         v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
         v.push(restore_tm(&pc, s));
         repl.insert(i, v);

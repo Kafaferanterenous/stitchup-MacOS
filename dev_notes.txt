@@ -1043,3 +1043,18 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   family "" keeps the original font and changes only the size.
 - Attachments removed from the ribbon and File menu.
 - TESTS: core 46, command layer 9, e2e 76/76.
+
+2026-11-14 — v0.7.0: INSTALLED FONTS (picker, embedding, Unicode fallback), BOLD ON ORIGINAL FONT
+- User: "only 4 alternatives listed, bold did not work". B/I were disabled for "Original font".
+- core/src/fonts.rs: scans /System/Library/Fonts(+Supplemental), /Library/Fonts, ~/Library/Fonts
+  with ttf-parser (skips fsType Restricted, bitmap/colour-only and hidden "." fonts; ~99 families
+  here). Warmed in a background thread at start-up (~1.5 s). embed_text subsets with `subsetter`
+  (glyph remap), writes Type0/Identity-H + CIDFontType2 (FontFile2) or CIDFontType0 (CFF table as
+  FontFile3/CIDFontType0C), W widths, ToUnicode CMap; subset tag from a hash.
+- objects::set_font accepts an installed PostScript name; textedit::replacement_font: standard font
+  when it covers the text, else the original font if installed, else fallback_face (serif/sans/mono,
+  bold, italic; CJK prefers Hiragino/PingFang/Apple SD Gothic) — no more "?".
+- UI: FontPicker (search, Original, Standard, Installed with Кир/Ελ/中 tags), used by the edit bar
+  and the Font dialog. Bold/italic on Original: same installed family if found, else Times/Courier/
+  Helvetica by look.
+- TESTS: core 48, command layer 9, e2e 76/76 (Arial pick, Arial-Bold, Cyrillic edit).

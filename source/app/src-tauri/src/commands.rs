@@ -1388,6 +1388,12 @@ pub fn move_pages_to_tab_inner(st: &Mutex<SessionState>, pages: Vec<u32>, to: u3
     logged(&mut g, "Move pages to another tab", |doc| delete_pages(doc, &pages).map(|_| ()))
 }
 
+/// Embeddable fonts installed on this Mac (scanned once; warmed at start-up).
+#[tauri::command]
+pub fn list_system_fonts() -> Vec<stitchup_core::fonts::SystemFace> {
+    stitchup_core::fonts::system_faces().to_vec()
+}
+
 // ---------------------------------------------------------------------------
 // OCR: the bundled `stitchup-ocr` helper (Apple Vision, on-device) reads a
 // rendered page image; the lines become an invisible text layer.

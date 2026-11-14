@@ -4,6 +4,7 @@ import { useAppState, store, getState, docName, isUntitled, rgb, annotColor } fr
 import { extractTo, parsePages, splitInto } from "../../actions";
 import { cmdDiscardRecovery, cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo, type RecoveryEntry } from "../../ipc";
 import { loadSettings, saveSettings, type Settings } from "../../settings";
+import { FontPicker, fontName, useSystemFonts, type FontChoice } from "./FontPicker";
 import { THEMES, applyTheme, currentTheme, type ThemeName } from "../../themes/theme";
 import { pageImage, toBase64 } from "../../export";
 import { PAPERS, fitOnSheet, printDocument } from "../../print";
@@ -45,6 +46,9 @@ const SHIPPED: { id: string; name: string; use: string; license: string }[] = [
   { id: "D-09", name: "Tauri dialog plugin", use: "open / save panels", license: "MIT / Apache-2.0" },
   { id: "—", name: "serde, base64, sha2, flate2 (Rust)", use: "data encoding, hashing, compression", license: "MIT / Apache-2.0" },
   { id: "—", name: "RustCrypto: rsa, x509-cert, cms, der, spki", use: "digital signatures (RSA-2048, X.509, PKCS#7)", license: "MIT / Apache-2.0" },
+  { id: "—", name: "ttf-parser, subsetter", use: "installed fonts: read, subset and embed", license: "MIT / Apache-2.0" },
+  { id: "—", name: "objc2 (app-kit, web-kit, foundation)", use: "native print settings", license: "MIT" },
+  { id: "—", name: "Apple Vision (macOS)", use: "text recognition (OCR), on this Mac", license: "part of macOS" },
 ];
 const NOT_YET: string[] = ["pdf-lib (D-04)", "Konva + react-konva (D-06)", "perfect-freehand (D-07)"];
 
@@ -52,8 +56,8 @@ export function AboutDialog() {
   return (
     <Modal title="About Stitchup" onClose={() => store.setDialog(null)} wide>
       <p>
-        <b>Stitchup</b> — offline-first PDF viewer &amp; editor. Your files never leave this computer, and the
-        original file is never overwritten: every save goes to a new file, written atomically.
+        <b>Stitchup</b> — offline PDF viewer &amp; editor. Your files never leave this computer, and a file
+        is only replaced when you save — written to a temporary file first, then swapped in, so it is never half-written.
       </p>
       <h3>Open-source components</h3>
       <table className="license-table">
@@ -927,25 +931,16 @@ export function RecolorDialog() {
 }
 
 export function FontDialog() {
-  const [family, setFamily] = useState("Helvetica");
+  const faces = useSystemFonts();
+  const [family, setFamily] = useState<FontChoice>("Helvetica");
   const [bold, setBold] = useState(false);
   const [italic, setItalic] = useState(false);
   const [size, setSize] = useState("");
-  const name = (() => {
-    if (family === "Times") return bold && italic ? "Times-BoldItalic" : bold ? "Times-Bold" : italic ? "Times-Italic" : "Times-Roman";
-    const slant = family === "Courier" || family === "Helvetica" ? "Oblique" : "Italic";
-    const sfx = bold && italic ? `-Bold${slant}` : bold ? "-Bold" : italic ? `-${slant}` : "";
-    return family + sfx;
-  })();
   return (
     <Modal title="Font and size" onClose={close}>
       <label>
-        Family
-        <select value={family} onChange={(e) => setFamily(e.target.value)} aria-label="Font family">
-          <option>Helvetica</option>
-          <option>Times</option>
-          <option>Courier</option>
-        </select>
+        Font
+        <FontPicker value={family} onPick={setFamily} />
       </label>
       <label className="inline-check">
         <input type="checkbox" checked={bold} onChange={(e) => setBold(e.target.checked)} /> Bold
@@ -957,11 +952,12 @@ export function FontDialog() {
         Size (pt, empty = keep)
         <input value={size} onChange={(e) => setSize(e.target.value)} inputMode="decimal" aria-label="Font size" />
       </label>
+      <p className="muted">Installed fonts are embedded (only the letters used), so the PDF looks the same on every computer.</p>
       <div className="modal-actions">
         <button
           onClick={async () => {
             const n = Number(size);
-            if (await store.objectOp({ op: "font", family: name, size: size.trim() && n > 0 ? n : undefined })) close();
+            if (await store.objectOp({ op: "font", family: fontName(faces, family, bold, italic), size: size.trim() && n > 0 ? n : undefined })) close();
           }}>
           Apply
         </button>

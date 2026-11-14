@@ -919,8 +919,7 @@ fn edit_in_content(
         }
         let family = standard_font(&fi.base_font);
         let name = unique_font_name(&fonts);
-        let enc = std14_encode(new_text);
-        let (bytes, bad) = (enc.bytes.clone(), enc.unsupported.clone());
+        let (font_obj, shown, used, bad) = replacement_font(doc, &fi.base_font, family, new_text);
         let m = mul(&[1.0, 0.0, 0.0, 1.0, start_tx, 0.0], &lead.trm);
         ops.insert(0, Operation::new("q", vec![]));
         ops.push(Operation::new("Q", vec![]));
@@ -931,13 +930,13 @@ fn edit_in_content(
             Operation::new("Tf", vec![Object::Name(name.clone()), r(lead.size)]),
             Operation::new("Ts", vec![r(lead.rise)]),
             Operation::new("Tm", m.iter().map(|v| r(*v)).collect()),
-            Operation::new("Tj", vec![Object::String(bytes, StringFormat::Literal)]),
+            Operation::new("Tj", vec![shown]),
             Operation::new("ET", vec![]),
             Operation::new("Q", vec![]),
         ]);
-        new_page.set("Resources", Object::Dictionary(add_font_resource(doc, &page, &name, std14_font(family, &enc.diffs))));
+        new_page.set("Resources", Object::Dictionary(add_font_resource(doc, &page, &name, font_obj)));
         let mut note = format!(
-            "{} lacks glyphs for the new text; replaced with {family}",
+            "{} lacks glyphs for the new text; replaced with {used}",
             short(&fi.base_font)
         );
         if !bad.is_empty() {
@@ -955,6 +954,30 @@ fn edit_in_content(
     Ok(Some(outcome))
 }
 
+/// Font + Tj operand for replacement text: a standard font when it has every
+/// letter; otherwise the original font if it is installed on this Mac, or an
+/// installed font of the same look (serif / sans / mono, bold, italic) that
+/// covers the text (Cyrillic, Greek, CJK…). Returns (font dict, operand, font
+/// name shown to the user, letters nothing could show).
+pub(crate) fn replacement_font(doc: &mut PdfDoc, original: &str, family: &str, text: &str) -> (Object, Object, String, Vec<char>) {
+    let enc = std14_encode(text);
+    if enc.unsupported.is_empty() {
+        return (std14_font(family, &enc.diffs), Object::String(enc.bytes, StringFormat::Literal), family.to_string(), vec![]);
+    }
+    let orig = short(original);
+    let installed = crate::fonts::find_face(&orig).filter(|f| crate::fonts::measure(f, text).map(|(_, m)| m.is_empty()).unwrap_or(false));
+    let lower = family.to_ascii_lowercase();
+    let face = installed.or_else(|| {
+        crate::fonts::fallback_face(text, lower.starts_with("times"), lower.starts_with("courier"), lower.contains("bold"), lower.contains("italic") || lower.contains("oblique"))
+    });
+    if let Some(face) = face {
+        if let Ok(e) = crate::fonts::embed_text(doc, face, text) {
+            return (Object::Reference(e.font), crate::fonts::hex_string(e.bytes), face.postscript.clone(), e.missing);
+        }
+    }
+    (std14_font(family, &enc.diffs), Object::String(enc.bytes, StringFormat::Literal), family.to_string(), enc.unsupported)
+}
+
 fn short(base: &str) -> String {
     let b = base.split_once('+').map(|(_, r)| r).unwrap_or(base);
     if b.is_empty() { "font".into() } else { b.to_string() }
@@ -963,8 +986,7 @@ fn short(base: &str) -> String {
 /// Legacy fallback: white patch over the run's box + Helvetica text.
 fn overlay(doc: &mut PdfDoc, page_id: ObjectId, req: &EditRequest, new_text: &str) -> Result<EditOutcome, EngineError> {
     let size = req.font_size.max(1.0);
-    let enc = std14_encode(new_text);
-    let (bytes, bad) = (enc.bytes.clone(), enc.unsupported.clone());
+    let (font_obj, shown, used, bad) = replacement_font(doc, "Helvetica", "Helvetica", new_text);
     let page = doc.get_object(page_id)?.as_dict()?.clone();
     let fonts: BTreeMap<Vec<u8>, FontInfo> = doc
         .get_page_fonts(page_id)
@@ -989,7 +1011,7 @@ fn overlay(doc: &mut PdfDoc, page_id: ObjectId, req: &EditRequest, new_text: &st
         Operation::new("BT", vec![]),
         Operation::new("Tf", vec![Object::Name(name.clone()), Object::Real(size as f32)]),
         Operation::new("Td", vec![Object::Real(req.x as f32), Object::Real(req.y as f32)]),
-        Operation::new("Tj", vec![Object::String(bytes, StringFormat::Literal)]),
+        Operation::new("Tj", vec![shown]),
         Operation::new("ET", vec![]),
         Operation::new("Q", vec![]),
     ];
@@ -1005,10 +1027,10 @@ fn overlay(doc: &mut PdfDoc, page_id: ObjectId, req: &EditRequest, new_text: &st
         _ => Object::Reference(sid),
     };
     let mut new_page = page.clone();
-    new_page.set("Resources", Object::Dictionary(add_font_resource(doc, &page, &name, std14_font("Helvetica", &enc.diffs))));
+    new_page.set("Resources", Object::Dictionary(add_font_resource(doc, &page, &name, font_obj)));
     new_page.set("Contents", contents);
     doc.objects.insert(page_id, Object::Dictionary(new_page));
-    let mut note = "text not found in the page content; covered and redrawn in Helvetica".to_string();
+    let mut note = format!("text not found in the page content; covered and redrawn in {used}");
     if !bad.is_empty() {
         note.push_str(&format!(" (unsupported: {})", bad.iter().collect::<String>()));
     }

@@ -223,3 +223,32 @@ fn text_objects_report_font_size_colour_and_size_only_change_keeps_the_font() {
     let line = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap();
     assert_eq!((line.font.as_deref(), line.size), (Some("Times-Roman"), Some(18.0)));
 }
+
+#[test]
+fn installed_font_is_embedded_as_a_subset_and_text_stays_extractable() {
+    let Some(face) = stitchup_core::fonts::face_in_family("Arial", true, false).or_else(|| stitchup_core::fonts::system_faces().first()) else { return };
+    let mut d = doc();
+    let id = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap().id;
+    objects::set_font(&mut d, 1, &[id], &face.postscript, Some(14.0)).unwrap();
+    let back = reload(&mut d);
+    assert!(back.extract_text(&[1]).unwrap().contains("Public line"), "ToUnicode keeps the text");
+    let line = objects::list(&back, 1).unwrap().into_iter().find(|o| o.text.contains("Public line")).unwrap();
+    assert!(line.font.as_deref() == Some(face.postscript.replace(' ', "").as_str()) && line.size == Some(14.0), "{:?} {:?}", line.font, line.size);
+}
+
+#[test]
+fn editing_to_cyrillic_and_greek_uses_an_installed_font_instead_of_question_marks() {
+    if stitchup_core::fonts::system_faces().iter().all(|f| !f.cyrillic) {
+        return; // no fonts on this machine
+    }
+    let mut d = doc();
+    let req = stitchup_core::textedit::EditRequest {
+        page: 1, x: 72.0, y: 680.0, width: 61.0, font_size: 12.0,
+        old_text: "Public line".into(), new_text: "Привет, мир — Γειά σου".into(),
+    };
+    let out = stitchup_core::textedit::edit_text(&mut d, &req).unwrap();
+    let back = reload(&mut d);
+    let text = back.extract_text(&[1]).unwrap();
+    assert!(text.contains("Привет, мир") && text.contains("Γειά σου"), "{text} / {}", out.note);
+    assert!(!text.contains('?'), "{text}");
+}
