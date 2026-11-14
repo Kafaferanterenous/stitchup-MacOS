@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { useAppState, store, getState, docName, isUntitled, rgb, annotColor } from "../../store";
 import { extractTo, parsePages, splitInto } from "../../actions";
-import { cmdDiscardRecovery, cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo, type RecoveryEntry } from "../../ipc";
+import { cmdSaveCompressed, cmdDiscardRecovery, cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo, type RecoveryEntry } from "../../ipc";
 import { loadSettings, saveSettings, type Settings } from "../../settings";
 import { FontPicker, fontName, useSystemFonts, type FontChoice } from "./FontPicker";
 import { THEMES, applyTheme, currentTheme, type ThemeName } from "../../themes/theme";
@@ -47,6 +47,7 @@ const SHIPPED: { id: string; name: string; use: string; license: string }[] = [
   { id: "—", name: "serde, base64, sha2, flate2 (Rust)", use: "data encoding, hashing, compression", license: "MIT / Apache-2.0" },
   { id: "—", name: "RustCrypto: rsa, x509-cert, cms, der, spki", use: "digital signatures (RSA-2048, X.509, PKCS#7)", license: "MIT / Apache-2.0" },
   { id: "—", name: "ttf-parser, subsetter", use: "installed fonts: read, subset and embed", license: "MIT / Apache-2.0" },
+  { id: "—", name: "jpeg-decoder, jpeg-encoder", use: "Compress: smaller images", license: "MIT / Apache-2.0" },
   { id: "—", name: "objc2 (app-kit, web-kit, foundation)", use: "native print settings", license: "MIT" },
   { id: "—", name: "Apple Vision (macOS)", use: "text recognition (OCR), on this Mac", license: "part of macOS" },
 ];
@@ -1055,6 +1056,63 @@ export function RecoveryDialog({ entries, onDone }: { entries: RecoveryEntry[]; 
         <button onClick={() => void discard()} disabled={busy}>
           Discard
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+
+// ---------------------------------------------------------------- compress
+
+const COMPRESS_LEVELS = [
+  { id: "screen", label: "Screen — images at 150 dpi (recommended)", dpi: 150, quality: 75 },
+  { id: "print", label: "Print — images at 300 dpi", dpi: 300, quality: 85 },
+  { id: "smallest", label: "Smallest — images at 96 dpi", dpi: 96, quality: 60 },
+  { id: "lossless", label: "Lossless — keep images as they are", dpi: undefined, quality: undefined },
+] as const;
+
+export function CompressDialog() {
+  const app = useAppState();
+  const [level, setLevel] = useState<(typeof COMPRESS_LEVELS)[number]["id"]>("screen");
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    const doc = app.doc;
+    if (!doc) return;
+    const base = docName(doc).replace(/\.pdf$/i, "");
+    const dir = isUntitled(doc) ? "" : doc.path.slice(0, doc.path.lastIndexOf("/") + 1);
+    const target = await saveDialog({ defaultPath: `${dir}${base}-compressed.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    if (typeof target !== "string") return;
+    const l = COMPRESS_LEVELS.find((x) => x.id === level)!;
+    setBusy(true);
+    try {
+      const r = await cmdSaveCompressed(target, l.dpi, l.quality);
+      const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+      const pct = r.before > 0 ? Math.round((1 - r.after / r.before) * 100) : 0;
+      const imgs = r.images?.images ? ` · ${r.images.images} image${r.images.images > 1 ? "s" : ""} downsampled` : "";
+      store.notify(`Compressed: ${kb(r.before)} → ${kb(r.after)} (${pct}% smaller)${imgs}`);
+      close();
+    } catch (e) {
+      store.notify(`Compress failed: ${(e as { message?: string }).message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Compress PDF" onClose={close}>
+      <p className="muted">Saves a smaller copy; the open document is not changed. Unused data is removed and everything is recompressed.</p>
+      <div role="radiogroup" aria-label="Compression level" className="compress-levels">
+        {COMPRESS_LEVELS.map((l) => (
+          <label key={l.id} className="inline-check">
+            <input type="radio" name="compress-level" checked={level === l.id} onChange={() => setLevel(l.id)} /> {l.label}
+          </label>
+        ))}
+      </div>
+      <p className="muted">Only images shown at a higher resolution than this are made smaller; text and drawings stay sharp.</p>
+      <div className="modal-actions">
+        <button onClick={() => void go()} disabled={busy}>
+          {busy ? "Compressing…" : "Save Copy…"}
+        </button>
+        <button onClick={close}>Cancel</button>
       </div>
     </Modal>
   );

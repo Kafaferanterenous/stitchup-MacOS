@@ -40,7 +40,8 @@ not notarized. The first time you open it, right-click it and choose
   links and freehand pen. All are real PDF annotations, so they look the same
   in Preview and Acrobat.
 - **Redact:** what is under the box is removed from the file, not just covered.
-- **Content tools:** select, move and delete text, images and annotations.
+- **Content tools:** select, move and delete text, images, shapes (lines,
+  rectangles, filled areas) and annotations.
   Recolour text, change its font and size, insert images (PNG with
   transparency, JPEG, HEIC…) and draw vector shapes.
 - **Forms:** fill text fields, checkboxes, radio buttons and drop-downs.
@@ -53,11 +54,13 @@ not notarized. The first time you open it, right-click it and choose
   split, merge, import, combine, and auto-crop.
 - **Security:** AES-256 password protection, watermarks, and digital signatures
   (RSA-2048 / SHA-256 PKCS#7, verifiable with OpenSSL). Signing an already
-  signed PDF adds an incremental update, so earlier signatures stay valid.
+  signed PDF, or saving changes to it, adds an incremental update, so earlier
+  signatures stay valid.
 - **Safety:** quitting with unsaved changes asks first. Optional crash-recovery
   snapshots (File ▸ Settings, ⌘,) bring unsaved work back after a crash.
 - **Export:** Text, CSV, RTF, DOCX, ODT, and PNG or JPEG images. Print with
-  preview; "Save as PDF" is in the macOS print panel. Compress PDF.
+  preview; "Save as PDF" is in the macOS print panel. Compress PDF, with
+  oversized images made smaller (150, 300 or 96 dpi).
 - **Navigation and viewing:** find (⌘F, F3), thumbnails, bookmarks, single,
   spread and continuous views, zoom and fit, unlimited undo and redo, and
   the nine Windows colour schemes. Open by double-clicking in Finder, by
@@ -80,7 +83,7 @@ Tests:
 |---|---|
 | `cd source/core && cargo test --release` | PDF engine: text editing, annotations, redaction, forms, signatures (checked with OpenSSL), page tree |
 | `cd source/app/src-tauri && cargo test --release` | Command layer |
-| `cd source/app && npm run build && npm run test:e2e` | 76 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
+| `cd source/app && npm run build && npm run test:e2e` | 77 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
 
 ## Layout
 

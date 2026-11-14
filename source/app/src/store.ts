@@ -225,6 +225,7 @@ export type Dialog =
   | "recolor"
   | "font"
   | "settings"
+  | "compress"
   | "recovery";
 
 let state: AppState = {

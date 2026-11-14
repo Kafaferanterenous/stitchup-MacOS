@@ -109,3 +109,29 @@ fn second_signature_is_incremental_and_both_still_verify() {
     let names: Vec<String> = list_signatures(&back).into_iter().map(|s| s.0).collect();
     assert!(names.contains(&"Jan Kowalski".into()) && names.contains(&"Anna Nowak".into()), "{names:?}");
 }
+
+#[test]
+fn edited_signed_pdf_saved_incrementally_keeps_the_first_signature_and_can_be_signed_again() {
+    let doc = new_blank(612.0, 792.0).unwrap();
+    let first = sign_document(&doc, &spec(true)).unwrap();
+    // Open (as the app does), edit: add a sticky note.
+    let mut d = PdfDoc::load_mem(&first).unwrap();
+    let _ = stitchup_core::ops::flatten_page_tree(&mut d);
+    stitchup_core::annots::add(&mut d, 1, &stitchup_core::annots::AnnotSpec::Note { at: [300.0, 600.0], text: "Checked".into(), color: [1.0, 0.85, 0.2] }).unwrap();
+    let edited = stitchup_core::docops::incremental_update(&first, &d).unwrap();
+    assert!(edited.starts_with(&first) && edited.len() > first.len(), "appended, not rewritten");
+    let (d1, s1) = parts_n(&edited, 0);
+    assert!(openssl_verifies(&d1, &s1), "first signature still valid after the edit");
+    let back = PdfDoc::load_mem(&edited).unwrap();
+    let page = *back.get_pages().get(&1).unwrap();
+    let annots = back.get_page_annotations(page).unwrap();
+    assert!(annots.iter().any(|a| a.get(b"Subtype").and_then(|s| s.as_name()).ok() == Some(b"Text".as_slice())), "the note is in the saved file");
+    // Second signer on top of the edit.
+    let both = sign_bytes(edited.clone(), &SignSpec { name: "Anna Nowak".into(), rect: Some([40.0, 40.0, 260.0, 100.0]), ..spec(true) }).unwrap();
+    let (d1, s1) = parts_n(&both, 0);
+    let (d2, s2) = parts_n(&both, 1);
+    assert!(openssl_verifies(&d1, &s1) && openssl_verifies(&d2, &s2), "both signatures valid");
+    // Unchanged document → same bytes.
+    let same = PdfDoc::load_mem(&first).unwrap();
+    assert_eq!(stitchup_core::docops::incremental_update(&first, &same).unwrap(), first);
+}

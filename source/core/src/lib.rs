@@ -20,6 +20,7 @@ pub mod std14;
 pub mod forms;
 pub mod ocr;
 pub mod fonts;
+pub mod images;
 
 pub use error::{EngineError, ErrorCode};
 pub use model::{

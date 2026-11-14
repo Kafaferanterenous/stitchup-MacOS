@@ -8,7 +8,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { toggleDark } from "./themes/theme";
 import type { IconName } from "./features/ribbon/icons";
 import * as exp from "./export";
-import { cmdReadImage, cmdSaveCompressed, cmdWriteFile } from "./ipc";
+import { cmdReadImage, cmdWriteFile } from "./ipc";
 
 export interface Command {
   id: string;
@@ -108,16 +108,8 @@ async function exportBytes(ext: string, label: string, make: () => Promise<Uint8
 
 const lines = () => exp.pageLines(getState().session!);
 
-async function compress() {
-  const target = await saveDialog({ defaultPath: `${dirOf()}${stem()}-compressed.pdf`, filters: PDF });
-  if (typeof target !== "string") return;
-  try {
-    const r = await cmdSaveCompressed(target);
-    const pct = r.before > 0 ? Math.round((1 - r.after / r.before) * 100) : 0;
-    store.notify(`Compressed: ${(r.before / 1024).toFixed(0)} KB → ${(r.after / 1024).toFixed(0)} KB (${pct}% smaller)`);
-  } catch (e) {
-    store.notify(`Compress failed: ${(e as Error).message ?? e}`);
-  }
+function compress() {
+  store.setDialog("compress");
 }
 
 async function mergeMany() {
@@ -203,7 +195,7 @@ export const COMMANDS: Command[] = [
   { id: "printPdf", label: "to PDF", menu: "Print to PDF…", tip: "Print to a PDF file (choose PDF ▸ Save as PDF in the print panel)", icon: "to-pdf", tab: "Document", enabled: hasDoc, run: () => store.setDialog("print") },
   { id: "mergePdfs", label: "Merge", menu: "Merge PDFs…", tip: "Append one or more PDFs to this document", icon: "merge", enabled: hasDoc, run: mergeMany },
   { id: "combineNew", label: "Combine", menu: "Combine into New…", tip: "Combine several PDFs into a new document", icon: "merge", run: combineNew },
-  { id: "compress", label: "Compress", menu: "Compress PDF…", tip: "Save a smaller copy (unused data removed, streams compressed)", icon: "compress", enabled: hasDoc, run: compress },
+  { id: "compress", label: "Compress", menu: "Compress PDF…", tip: "Save a smaller copy: unused data removed, streams compressed, large images downsampled", icon: "compress", enabled: hasDoc, run: compress },
   { id: "settings", label: "Settings", menu: "Settings…", tip: "Crash recovery, opening zoom, sidebar (⌘,)", icon: "info", accel: "CmdOrCtrl+,", run: () => store.setDialog("settings") },
   { id: "newTab", label: "New Tab", tip: "Open an empty tab (⌘T)", icon: "new", accel: "CmdOrCtrl+T", run: () => store.newTab() },
   { id: "closeTab", label: "Close Tab", tip: "Close this tab (⌘W)", icon: "exit", accel: "CmdOrCtrl+W", run: () => store.closeTab(getState().activeTab) },

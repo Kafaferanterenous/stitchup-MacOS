@@ -20,6 +20,7 @@ import {
   AnnotInputDialog,
   RecoveryDialog,
   SettingsDialog,
+  CompressDialog,
   FontDialog,
   RecolorDialog,
   SignDialog,
@@ -227,6 +228,7 @@ export default function App() {
       {app.dialog === "font" && <FontDialog />}
       {app.pendingInput && <AnnotInputDialog />}
       {app.dialog === "settings" && <SettingsDialog />}
+      {app.dialog === "compress" && <CompressDialog />}
       {recovered && <RecoveryDialog entries={recovered} onDone={() => setRecovered(null)} />}
       <PasswordDialog />
       <MessageBox />

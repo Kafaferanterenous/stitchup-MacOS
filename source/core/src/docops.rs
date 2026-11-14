@@ -350,7 +350,21 @@ fn random_bytes<const N: usize>() -> Result<[u8; N], EngineError> {
 /// Smallest faithful serialization: unused objects dropped, every stream
 /// Flate-compressed, objects packed into object streams.
 pub fn compressed_bytes(doc: &PdfDoc) -> Result<Vec<u8>, EngineError> {
+    compressed_bytes_with(doc, None, 75).map(|(b, _)| b)
+}
+
+/// Compress, optionally downsampling images above `image_dpi` (JPEG `quality`).
+pub fn compressed_bytes_with(doc: &PdfDoc, image_dpi: Option<f64>, quality: u8) -> Result<(Vec<u8>, crate::images::DownsampleReport), EngineError> {
     let mut copy = doc.clone();
+    let rep = match image_dpi {
+        Some(dpi) => crate::images::downsample_images(&mut copy, dpi, quality),
+        None => Default::default(),
+    };
+    let out = compressed_inner(copy)?;
+    Ok((out, rep))
+}
+
+fn compressed_inner(mut copy: PdfDoc) -> Result<Vec<u8>, EngineError> {
     copy.trailer.remove(b"Encrypt");
     copy.prune_objects();
     copy.compress();
@@ -501,4 +515,43 @@ pub fn list_field_names(doc: &PdfDoc) -> Vec<String> {
         walk(doc, f, &mut out, 0);
     }
     out
+}
+
+// ----------------------------------------------------------- incremental save
+
+/// Save `current` as an INCREMENTAL UPDATE of the file it was opened from:
+/// `original` is kept byte-for-byte and only the objects that changed (or are
+/// new) are appended. Digital signatures in `original` therefore stay valid
+/// for the revision they signed. `current` must have been loaded from
+/// `original` (object numbers shared); the page tree is flattened at open,
+/// so the comparison applies the same step.
+pub fn incremental_update(original: &[u8], current: &PdfDoc) -> Result<Vec<u8>, EngineError> {
+    let prev = PdfDoc::load_mem(original)?;
+    if prev.is_encrypted() || current.trailer.get(b"Encrypt").is_ok() {
+        return Err(crate::err!(ErrorCode::Unsupported, "password-protected PDFs are saved in full"));
+    }
+    let mut base = prev.clone();
+    let _ = crate::ops::flatten_page_tree(&mut base);
+    let mut inc = lopdf::IncrementalDocument::create_from(original.to_vec(), prev);
+    let mut changed = 0;
+    for (id, obj) in &current.objects {
+        if base.objects.get(id) != Some(obj) {
+            inc.new_document.objects.insert(*id, obj.clone());
+            changed += 1;
+        }
+    }
+    let root_changed = current.trailer.get(b"Root").ok() != base.trailer.get(b"Root").ok();
+    let info_changed = current.trailer.get(b"Info").ok() != base.trailer.get(b"Info").ok();
+    if changed == 0 && !root_changed && !info_changed {
+        return Ok(original.to_vec());
+    }
+    for k in [b"Root".as_slice(), b"Info".as_slice()] {
+        if let Ok(v) = current.trailer.get(k) {
+            inc.new_document.trailer.set(k, v.clone());
+        }
+    }
+    inc.new_document.max_id = inc.new_document.max_id.max(current.max_id);
+    let mut out = Vec::new();
+    inc.save_to(&mut out)?;
+    Ok(out)
 }

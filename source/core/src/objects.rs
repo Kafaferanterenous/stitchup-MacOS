@@ -198,6 +198,19 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
             out.push(PageObject { id: format!("t{}", s.op), kind: "text".into(), text: s.text.clone(), rect: b, font, size: Some(size), color });
         }
     }
+    // Vector paths (lines, rectangles, filled shapes) — not a full-page background.
+    let pb = crate::docops::page_box(doc, pc.page);
+    let page_area = (pb[2] - pb[0]) * (pb[3] - pb[1]);
+    for p in &pc.parsed.paths {
+        let b = p.bbox;
+        if (b[2] - b[0]) * (b[3] - b[1]) > page_area * 0.9 {
+            continue;
+        }
+        // Thin lines get at least a 3 pt target to click.
+        let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+        let (hw, hh) = (((b[2] - b[0]) / 2.0).max(1.5), ((b[3] - b[1]) / 2.0).max(1.5));
+        out.push(PageObject { id: format!("p{}", p.op), kind: "path".into(), text: String::new(), rect: [cx - hw, cy - hh, cx + hw, cy + hh], font: None, size: None, color: None });
+    }
     for d in &pc.parsed.draws {
         let image = pc.xobjects.get(&d.name).copied().unwrap_or(false);
         out.push(PageObject {
@@ -307,6 +320,13 @@ pub fn delete(doc: &mut PdfDoc, page_no: u32, ids: &[String]) -> Result<usize, E
             'i' => {
                 repl.insert(i, vec![]);
             }
+            'p' => {
+                if let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) {
+                    for j in p.start..=p.op {
+                        repl.insert(j, vec![]);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -354,6 +374,13 @@ pub fn translate(doc: &mut PdfDoc, page_no: u32, ids: &[String], dx: f64, dy: f6
                     Operation::new("Q", vec![]),
                 ]);
             }
+            'p' => {
+                let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) else { continue };
+                let Some(ci) = inv(&p.ctm) else { continue };
+                let m = mul(&mul(&p.ctm, &[1.0, 0.0, 0.0, 1.0, dx, dy]), &ci);
+                repl.insert(p.start, vec![Operation::new("q", vec![]), Operation::new("cm", m.iter().map(|x| r(*x)).collect()), pc.ops[p.start].clone()]);
+                repl.insert(p.op, vec![pc.ops[p.op].clone(), Operation::new("Q", vec![])]);
+            }
             _ => {}
         }
     }
@@ -379,6 +406,14 @@ pub fn recolor(doc: &mut PdfDoc, page_no: u32, ids: &[String], rgb: [f64; 3]) ->
     let pc = load(doc, page_no)?;
     let mut repl = HashMap::new();
     for (k, i) in parse_ids(ids) {
+        if k == 'p' {
+            // Shapes: outline and fill in the new colour.
+            let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) else { continue };
+            let c: Vec<Object> = rgb.iter().map(|v| r(*v)).collect();
+            repl.insert(p.start, vec![Operation::new("q", vec![]), Operation::new("RG", c.clone()), Operation::new("rg", c), pc.ops[p.start].clone()]);
+            repl.insert(p.op, vec![pc.ops[p.op].clone(), Operation::new("Q", vec![])]);
+            continue;
+        }
         if k != 't' {
             continue;
         }
@@ -389,7 +424,7 @@ pub fn recolor(doc: &mut PdfDoc, page_no: u32, ids: &[String], rgb: [f64; 3]) ->
     }
     let n = repl.len();
     if n == 0 {
-        return Err(crate::err!(ErrorCode::ValidationFailed, "select text to recolour (images keep their colours)"));
+        return Err(crate::err!(ErrorCode::ValidationFailed, "select text or shapes to recolour (images keep their colours)"));
     }
     let ops = rebuild(&pc.ops, repl);
     store(doc, &pc, ops)?;

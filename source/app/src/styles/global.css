@@ -1563,3 +1563,13 @@ kbd {
   letter-spacing: 0.04em;
   opacity: 0.6;
 }
+.compress-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.obj-box.path {
+  outline-color: color-mix(in srgb, #00a3a3 70%, transparent);
+}

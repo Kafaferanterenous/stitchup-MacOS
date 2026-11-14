@@ -337,6 +337,16 @@ pub(crate) struct Draw {
 pub(crate) struct Interpreted {
     pub(crate) shows: Vec<Show>,
     pub(crate) draws: Vec<Draw>,
+    pub(crate) paths: Vec<PathObj>,
+}
+
+/// A painted vector path: ops `start..=op` (construction + paint).
+pub(crate) struct PathObj {
+    pub(crate) start: usize,
+    pub(crate) op: usize,
+    /// Bounding box in user space (stroke width included).
+    pub(crate) bbox: [f64; 4],
+    pub(crate) ctm: M,
 }
 
 impl Show {
@@ -371,11 +381,52 @@ pub(crate) fn interpret_page(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<V
     let mut stack: Vec<(M, TextState, Vec<Operation>)> = Vec::new();
     let mut ts = TextState::default();
     let mut block = 0usize;
+    let mut paths = Vec::new();
+    let mut lw = 1.0f64;
+    let mut lw_stack: Vec<f64> = Vec::new();
+    let mut path_start: Option<usize> = None;
+    let mut pts: Vec<(f64, f64)> = Vec::new();
 
     for (i, op) in ops.iter().enumerate() {
         let a = &op.operands;
+        let pt = |x: f64, y: f64, m: &M| (x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5]);
         match op.operator.as_str() {
-            "q" => stack.push((ctm, ts.clone(), fill.clone())),
+            "w" => lw = a.first().and_then(num).unwrap_or(lw),
+            "m" | "l" | "c" | "v" | "y" | "re" | "h" => {
+                path_start.get_or_insert(i);
+                let v: Vec<f64> = a.iter().filter_map(num).collect();
+                if op.operator == "re" && v.len() == 4 {
+                    for (x, y) in [(v[0], v[1]), (v[0] + v[2], v[1]), (v[0], v[1] + v[3]), (v[0] + v[2], v[1] + v[3])] {
+                        pts.push(pt(x, y, &ctm));
+                    }
+                } else {
+                    for c in v.chunks(2).filter(|c| c.len() == 2) {
+                        pts.push(pt(c[0], c[1], &ctm));
+                    }
+                }
+            }
+            "S" | "s" | "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "n" => {
+                if let (Some(start), false) = (path_start.take(), pts.is_empty()) {
+                    if op.operator != "n" {
+                        let stroke = matches!(op.operator.as_str(), "S" | "s" | "B" | "B*" | "b" | "b*");
+                        let scale = ((ctm[0] * ctm[0] + ctm[1] * ctm[1]).sqrt() + (ctm[2] * ctm[2] + ctm[3] * ctm[3]).sqrt()) / 2.0;
+                        let pad = if stroke { (lw * scale / 2.0).max(0.5) } else { 0.0 };
+                        let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                        for (x, y) in &pts {
+                            x0 = x0.min(*x);
+                            y0 = y0.min(*y);
+                            x1 = x1.max(*x);
+                            y1 = y1.max(*y);
+                        }
+                        paths.push(PathObj { start, op: i, bbox: [x0 - pad, y0 - pad, x1 + pad, y1 + pad], ctm });
+                    }
+                }
+                pts.clear();
+            }
+            "q" => {
+                lw_stack.push(lw);
+                stack.push((ctm, ts.clone(), fill.clone()))
+            }
             "cs" => fill = vec![op.clone()],
             "rg" | "g" | "k" => fill = vec![op.clone()],
             "sc" | "scn" => {
@@ -388,6 +439,7 @@ pub(crate) fn interpret_page(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<V
                 }
             }
             "Q" => {
+                lw = lw_stack.pop().unwrap_or(lw);
                 if let Some((c, t, f)) = stack.pop() {
                     ctm = c;
                     fill = f;
@@ -534,7 +586,7 @@ pub(crate) fn interpret_page(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<V
             _ => {}
         }
     }
-    Interpreted { shows: out, draws }
+    Interpreted { shows: out, draws, paths }
 }
 
 fn norm(s: &str) -> String {

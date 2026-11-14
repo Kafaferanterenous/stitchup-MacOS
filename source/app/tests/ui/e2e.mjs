@@ -877,6 +877,26 @@ await check("Content ▸ Fore/Back colours and Shapes ▾ insert into the page",
   await dragMouse(x, y, x + 120, y + 70);
   await waitStatus(/Inserted oval/);
   await page.keyboard.press("Escape");
+  // The shape is a selectable object: pick it, recolour it with Fore, delete it.
+  const paths = async () => (await ipc("list_objects", { page: 4 })).filter((o) => o.kind === "path");
+  const n0 = (await paths()).length;
+  assert(n0 >= 1, "oval listed as a path");
+  await rb("select").click();
+  await page.waitForSelector('[data-page="4"] .page-overlay[data-ready="true"]');
+  await page.waitForSelector('[data-page="4"] .obj-box.path');
+  await page.mouse.click(x + 60, y + 35);
+  await page.waitForSelector('[data-page="4"] .obj-box.path.picked');
+  await rb("fore").click();
+  await page.locator('.color-palette [aria-label="#7c4dbe"]').click();
+  await waitStatus(/Recoloured/);
+  await page.waitForSelector('[data-page="4"] .page-overlay[data-ready="true"]');
+  await page.waitForSelector('[data-page="4"] .obj-box.path');
+  await page.mouse.click(x + 60, y + 35);
+  await page.waitForSelector('[data-page="4"] .obj-box.path.picked');
+  await rb("objDelete").click();
+  await waitStatus(/Deleted 1 object/);
+  assert((await paths()).length === n0 - 1, "oval deleted");
+  await page.keyboard.press("Escape");
 });
 
 await check("Select picks annotations too: delete the stamp", async () => {
@@ -1123,6 +1143,43 @@ await check("editing a line shows its font & size; the bar changes size, colour 
   openPath = MAIN;
 });
 
+await check("an edited signed PDF: ⌘S and signing again keep every earlier signature valid", async () => {
+  const src = path.join(WORK, "signed-twice.pdf");
+  const f = path.join(WORK, "signed-edit.pdf");
+  await copyFile(src, f);
+  const orig = await readFile(f);
+  await openViaRibbon(f);
+  await page.evaluate(() => window.__stitchup.store.annotate(1, { kind: "note", at: [300, 600], text: "Checked", color: [1, 0.85, 0.2] }));
+  await waitStatus(/signed-edit\.pdf \*/);
+  await page.locator(".viewer-scroll").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("Meta+s");
+  await waitNotice(/Saved signed-edit\.pdf/);
+  const saved = await readFile(f);
+  assert(saved.length > orig.length && Buffer.compare(saved.subarray(0, orig.length), orig) === 0, "saved as an incremental update");
+  await verifySignature(f, 0);
+  await verifySignature(f, 1);
+  // Edit again, then sign as a third person.
+  await page.evaluate(() => window.__stitchup.store.annotate(1, { kind: "note", at: [200, 500], text: "Second look", color: [1, 0.85, 0.2] }));
+  await waitStatus(/signed-edit\.pdf \*/);
+  await tab("Security");
+  await rb("sign").click();
+  await page.getByLabel("Signer name").fill("Piotr Zieliński");
+  await page.getByLabel("Visible signature").uncheck();
+  const three = path.join(WORK, "signed-three.pdf");
+  await pick(three);
+  await btn("Sign & Save As…").click();
+  await waitNotice(/Signed by Piotr/);
+  const all = await readFile(three);
+  assert(Buffer.compare(all.subarray(0, saved.length), saved) === 0, "earlier revisions kept byte-for-byte");
+  for (const i of [0, 1, 2]) await verifySignature(three, i);
+  const d = await PDFDocument.load(all, { updateMetadata: false });
+  const notes = d.getPage(0).node.Annots().asArray().map((r) => d.context.lookup(r)).filter((a) => a.get(PDFName.of("Subtype")).toString() === "/Text");
+  assert(notes.length === 2, `both notes in the signed file: ${notes.length}`);
+  await page.locator(".doc-tab", { hasText: "main.pdf" }).click();
+  await waitStatus(/main\.pdf/);
+  openPath = MAIN;
+});
+
 await check("every button on every ribbon tab is live with a document open", async () => {
   const needsSelection = new Set(["objDelete", "recolor", "font"]);
   const dead = [];
@@ -1319,8 +1376,11 @@ await check("Pages ▸ Extract and Split write new files", async () => {
 
 await check("File ▸ Compress writes a smaller equivalent copy", async () => {
   const target = path.join(WORK, "small.pdf");
-  await pick(target);
   await run("compress");
+  await page.getByRole("radiogroup", { name: "Compression level" }).waitFor();
+  await page.getByLabel(/Screen — images at 150 dpi/).check();
+  await pick(target);
+  await btn("Save Copy…").click();
   await waitNotice(/Compressed:/);
   assert((await pdfText(target)).length === 4, "readable");
 });

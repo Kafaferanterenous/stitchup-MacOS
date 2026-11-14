@@ -390,3 +390,5 @@ Notes:
   all MIT / Apache-2.0) to embed installed fonts as subsets; `objc2`, `objc2-app-kit`,
   `objc2-web-kit`, `objc2-foundation` (MIT) for native print settings (v0.6.1). Fonts are
   only embedded when their OS/2 fsType allows it.
+- **Update 2026-11-14 (v0.8.0):** added `jpeg-decoder` 0.3 and `jpeg-encoder` 0.6
+  (both MIT / Apache-2.0) for Compress ▸ image downsampling.

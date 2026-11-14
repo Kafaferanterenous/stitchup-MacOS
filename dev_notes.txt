@@ -1058,3 +1058,20 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   and the Font dialog. Bold/italic on Original: same installed family if found, else Times/Courier/
   Helvetica by look.
 - TESTS: core 48, command layer 9, e2e 76/76 (Arial pick, Arial-Bold, Cyrillic edit).
+
+2026-11-14 — v0.8.0: VECTOR SHAPES SELECTABLE, COMPRESS DOWNSAMPLES IMAGES, RE-SIGN EDITED PDFs
+- textedit::interpret_page tracks painted paths (m/l/c/v/y/re/h … S/s/f/F/f*/B/B*/b/b*; n = clip,
+  ignored) with a page-space bbox (stroke width under the CTM included) → objects "p<paint op>",
+  kind "path"; full-page backgrounds (>90 % of the page) are not offered. Delete drops the ops,
+  move wraps them in q · cm(CTM×T×CTM⁻¹) · Q, recolour wraps them in q · RG · rg · Q.
+- images.rs: effective dpi per image XObject from page draws; above 1.25× the target → area-average
+  resample; DCT re-encoded as JPEG (quality per level), Flate stays Flate; SMask resampled to match;
+  replaced only when smaller; masks/CMYK/16-bit/Decode/other filters skipped. Compress dialog:
+  Screen 150 / Print 300 / Smallest 96 / Lossless.
+- docops::incremental_update: original bytes + every object that differs from a fresh load of
+  them (same page-tree flatten as open) + Root/Info. Sign uses it when the document was edited
+  (then signs incrementally); ⌘S uses it for signed PDFs. Verified: 3 signatures valid with
+  OpenSSL after edits; PDFKit reads the files.
+- User suggested studying open-source PDF apps (pdfcraft etc.): noted — use for ideas where useful,
+  mind licences (GPL/AGPL code can't be pasted into this MIT/Apache project).
+- TESTS: core 51, command layer 9, e2e 77/77.

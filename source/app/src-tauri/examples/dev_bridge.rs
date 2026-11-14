@@ -65,7 +65,7 @@ fn dispatch(st: &Mutex<SessionState>, cmd: &str, a: &Value) -> Result<Value, Val
             arg(a, "userPassword").map_err(bad)?,
             arg(a, "ownerPassword").map_err(bad)?
         )),
-        "save_compressed" => go!(save_compressed_inner(st, arg(a, "target").map_err(bad)?)),
+        "save_compressed" => go!(save_compressed_inner(st, arg(a, "target").map_err(bad)?, arg(a, "dpi").unwrap_or(None), arg(a, "quality").unwrap_or(None))),
         "list_attachments" => go!(list_attachments_inner(st)),
         "save_attachment" => go!(save_attachment_inner(st, arg(a, "index").map_err(bad)?, arg(a, "target").map_err(bad)?)),
         "write_file" => go!(write_file_inner(st, arg(a, "path").map_err(bad)?, arg(a, "b64").map_err(bad)?)),

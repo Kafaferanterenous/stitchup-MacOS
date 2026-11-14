@@ -252,3 +252,46 @@ fn editing_to_cyrillic_and_greek_uses_an_installed_font_instead_of_question_mark
     assert!(text.contains("Привет, мир") && text.contains("Γειά σου"), "{text} / {}", out.note);
     assert!(!text.contains('?'), "{text}");
 }
+
+#[test]
+fn vector_paths_can_be_listed_moved_recoloured_and_deleted() {
+    let mut d = doc();
+    let page = *d.get_pages().get(&1).unwrap();
+    let mut c = Content::decode(&d.get_page_content(page)).unwrap();
+    let n = |v: f64| Object::Real(v as f32);
+    let extra = vec![
+        // White full-page background: not offered as an object.
+        Operation::new("q", vec![]), Operation::new("rg", vec![n(1.0), n(1.0), n(1.0)]),
+        Operation::new("re", vec![n(0.0), n(0.0), n(612.0), n(792.0)]), Operation::new("f", vec![]), Operation::new("Q", vec![]),
+        // A 2 pt blue line.
+        Operation::new("q", vec![]), Operation::new("w", vec![n(2.0)]), Operation::new("RG", vec![n(0.0), n(0.0), n(1.0)]),
+        Operation::new("m", vec![n(100.0), n(100.0)]), Operation::new("l", vec![n(300.0), n(100.0)]), Operation::new("S", vec![]), Operation::new("Q", vec![]),
+        // A red filled rectangle, drawn under a scaling cm.
+        Operation::new("q", vec![]), Operation::new("cm", vec![n(2.0), n(0.0), n(0.0), n(2.0), n(0.0), n(0.0)]),
+        Operation::new("rg", vec![n(1.0), n(0.0), n(0.0)]), Operation::new("re", vec![n(175.0), n(200.0), n(50.0), n(25.0)]), Operation::new("f", vec![]), Operation::new("Q", vec![]),
+    ];
+    c.operations.splice(0..0, extra);
+    d.change_page_content(page, c.encode().unwrap()).unwrap();
+
+    let paths = |d: &PdfDoc| objects::list(d, 1).unwrap().into_iter().filter(|o| o.kind == "path").collect::<Vec<_>>();
+    let p = paths(&d);
+    assert_eq!(p.len(), 2, "{p:?}");
+    let line = p.iter().find(|o| (o.rect[1] - 99.0).abs() < 1.0).expect("line, 2 pt tall around y=100").clone();
+    let rect = p.iter().find(|o| (o.rect[0] - 350.0).abs() < 0.5).expect("rect at 350,400 in page space").clone();
+    assert_eq!(rect.rect.map(|v| v.round()), [350.0, 400.0, 450.0, 450.0]);
+
+    // Move the rectangle by (10, -20) in page space despite its 2× cm.
+    objects::translate(&mut d, 1, &[rect.id.clone()], 10.0, -20.0).unwrap();
+    let moved = paths(&d).into_iter().find(|o| (o.rect[0] - 360.0).abs() < 0.5).expect("moved rect");
+    assert_eq!(moved.rect.map(|v| v.round()), [360.0, 380.0, 460.0, 430.0]);
+    // Recolour the line, then delete the rectangle; text is untouched.
+    let line_id = paths(&d).into_iter().find(|o| (o.rect[1] - 99.0).abs() < 1.0).unwrap().id;
+    objects::recolor(&mut d, 1, &[line_id], [0.0, 0.6, 0.0]).unwrap();
+    let ops = Content::decode(&d.get_page_content(page)).unwrap().operations;
+    assert!(ops.iter().any(|o| o.operator == "RG" && o.operands.iter().filter_map(|v| v.as_float().ok()).collect::<Vec<_>>() == vec![0.0, 0.6, 0.0]), "line recoloured");
+    let rid = paths(&d).into_iter().find(|o| (o.rect[0] - 360.0).abs() < 0.5).unwrap().id;
+    objects::delete(&mut d, 1, &[rid]).unwrap();
+    assert_eq!(paths(&d).len(), 1, "rectangle deleted, line kept");
+    assert!(reload(&mut d).extract_text(&[1]).unwrap().contains("SECRET 1234"));
+    let _ = line;
+}

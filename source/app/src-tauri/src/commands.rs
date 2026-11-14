@@ -797,9 +797,13 @@ pub fn save_document_inner(st: &Mutex<SessionState>) -> Result<CommitResult, Eng
     assert_source_unmodified(&hash, &path)?;
     let password = g.password.clone();
     let doc = g.doc.as_mut().ok_or_else(no_doc)?;
-    let result = match &password {
-        Some(pw) => core_commit(&mut docops::encrypted_copy(doc, pw, pw)?, &path)?,
-        None => core_commit(doc, &path)?,
+    // A signed PDF is saved as an incremental update, so its signatures stay valid.
+    let signed = password.is_none() && !sign::list_signatures(doc).is_empty();
+    let incremental = if signed { std::fs::read(&path).ok().and_then(|b| docops::incremental_update(&b, doc).ok()) } else { None };
+    let result = match (&password, incremental) {
+        (_, Some(bytes)) => write_atomic(&path, &bytes)?,
+        (Some(pw), None) => core_commit(&mut docops::encrypted_copy(doc, pw, pw)?, &path)?,
+        (None, None) => core_commit(doc, &path)?,
     };
     // The saved file is the new baseline (source-shift guard + renderer bytes).
     let mut render = Vec::new();
@@ -865,20 +869,21 @@ pub fn save_encrypted_inner(
 
 /// Save a compressed copy; reports the size before and after.
 #[tauri::command]
-pub fn save_compressed(st: tauri::State<'_, Mutex<SessionState>>, target: String) -> Result<Value, EngineError> {
-    save_compressed_inner(&st, target)
+pub fn save_compressed(st: tauri::State<'_, Mutex<SessionState>>, target: String, dpi: Option<f64>, quality: Option<u8>) -> Result<Value, EngineError> {
+    save_compressed_inner(&st, target, dpi, quality)
 }
 
-pub fn save_compressed_inner(st: &Mutex<SessionState>, target: String) -> Result<Value, EngineError> {
+/// Smaller copy; `dpi` = downsample images above it (None = keep images).
+pub fn save_compressed_inner(st: &Mutex<SessionState>, target: String, dpi: Option<f64>, quality: Option<u8>) -> Result<Value, EngineError> {
     let g = lock(st)?;
     let target = PathBuf::from(target);
     guard_target(&g, &target, true)?;
     let doc = g.doc.as_ref().ok_or_else(no_doc)?;
     let mut plain = Vec::new();
     doc.clone().save_to(&mut plain).map_err(|e| EngineError::new(ErrorCode::IoError, e.to_string()))?;
-    let bytes = docops::compressed_bytes(doc)?;
+    let (bytes, images) = docops::compressed_bytes_with(doc, dpi.filter(|d| *d >= 36.0), quality.unwrap_or(75))?;
     let res = write_atomic(&target, &bytes)?;
-    Ok(serde_json::json!({ "before": plain.len(), "after": bytes.len(), "result": res }))
+    Ok(serde_json::json!({ "before": plain.len(), "after": bytes.len(), "result": res, "images": images }))
 }
 
 #[tauri::command]
@@ -1207,8 +1212,16 @@ pub fn sign_document_inner(st: &Mutex<SessionState>, target: String, spec: Value
     let on_disk = g.path.as_ref().and_then(|p| std::fs::read(p).ok()).filter(|b| {
         g.source_hash.as_deref() == Some(stitchup_core::hash::sha256_hex(b).as_str())
     });
+    // Edited since opening: append the edits as an incremental update of
+    // the opened file first, so earlier signatures in it stay valid too.
     let bytes = match (pristine, on_disk) {
         (true, Some(b)) => sign::sign_bytes(b, &spec)?,
+        (false, Some(b)) if !g.untitled && g.password.is_none() => {
+            match docops::incremental_update(&b, g.doc.as_ref().ok_or_else(no_doc)?) {
+                Ok(edited) => sign::sign_bytes(edited, &spec)?,
+                Err(_) => sign::sign_document(g.doc.as_ref().ok_or_else(no_doc)?, &spec)?,
+            }
+        }
         _ => sign::sign_document(g.doc.as_ref().ok_or_else(no_doc)?, &spec)?,
     };
     write_atomic(&target, &bytes)

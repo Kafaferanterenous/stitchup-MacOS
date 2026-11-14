@@ -2,7 +2,7 @@
 
 Target: the best all-round PDF editor, at feature and look parity with the
 Windows build (github.com/Kafaferanterenous/stitchup-Win v0.12.28), and ahead of it where macOS allows.
-Updated 2026-11-14 (v0.7.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
+Updated 2026-11-14 (v0.8.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
 
 ## A. Look & navigation (same as Windows)
 | # | Goal | Status |
@@ -23,7 +23,7 @@ Updated 2026-11-14 (v0.7.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | B4 | Export Text / CSV / Images (PNG, JPG) / RTF / DOCX / ODT | ✅ |
 | B5 | Print, Print Preview, Print to PDF — preview dialog + macOS print panel (Save as PDF there); the print panel gets the chosen paper, orientation and no margins, one printed page per selected page (v0.6.1 fix for "1 of 2"); not yet tried on a real printer | ✅ |
 | B6 | Document Properties ✅ · Attachments button removed for now (v0.6.1, user request); the code is kept | ✅ |
-| B7 | Compress PDF — unused objects removed + streams/object streams compressed; image downsampling still to do | ✅ |
+| B7 | Compress PDF — unused objects removed, streams/object streams compressed; images downsampled to 150 / 300 / 96 dpi from their size on the page (JPEG stays JPEG, lossless stays lossless, soft masks resampled too) | ✅ |
 | B8 | Crash-recovery snapshots (Off / 30 s / 1 min / 5 min, off by default like Windows) offered back after a crash; Settings (⌘,); quitting or closing the window with unsaved changes asks | ✅ |
 | B9 | Built-in User Guide (F1) — in-app guide (F1) rather than a help.pdf | ✅ |
 
@@ -49,7 +49,7 @@ Updated 2026-11-14 (v0.7.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 |---|------|--------|
 | E1 | In-place text edit in the original font | ✅ |
 | E2 | Unicode fallback font — Central European Latin via standard fonts; Cyrillic, Greek, CJK and any other script via an installed font of the same style (subset-embedded, ToUnicode kept) | ✅ |
-| E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs and images (vector paths not yet selectable); move, delete, marquee, ⌘-click | ✅ |
+| E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs, images and vector shapes (lines, rectangles, filled areas; recolour with Fore); move, delete, marquee, ⌘-click | ✅ |
 | E4 | Recolor, Font & size, Fore/Back colours — colour palettes; while editing a line a bar shows its real font and size; any installed font (searchable picker, names in their own typeface, subset-embedded) or the standard ones; bold/italic also on the original font (same installed family, else nearest standard) | ✅ |
 | E5 | Insert image — PNG (with transparency), JPEG (embedded as-is), GIF/WebP/HEIC/TIFF | ✅ |
 
@@ -61,7 +61,7 @@ Updated 2026-11-14 (v0.7.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | F3 | Watermark | ✅ |
 | F4 | True redaction (content removed, not covered) — text glyphs and whole images under the box removed; partly-covered images are blacked out | ✅ |
 | F5 | Fill AcroForms — text, multi-line, checkbox, radio, drop-down; appearances regenerated (shows in Preview/Acrobat); undoable | ✅ |
-| F6 | Digital signature — self-signed RSA-2048 / SHA-256 PKCS#7, visible box; verified with OpenSSL. Signing an already-signed, unchanged PDF appends an incremental update, so every earlier signature stays valid (two signatures verified with OpenSSL) | ✅ |
+| F6 | Digital signature — self-signed RSA-2048 / SHA-256 PKCS#7, visible box; verified with OpenSSL. Signing or saving (⌘S) an already-signed PDF — edited or not — appends an incremental update, so every earlier signature stays valid (three signatures verified with OpenSSL) | ✅ |
 
 ## G. Beyond Windows (macOS)
 | # | Goal | Status |

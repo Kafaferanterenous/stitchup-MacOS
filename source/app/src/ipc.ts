@@ -89,8 +89,8 @@ export const cmdWatermark = (spec: unknown) => cmd<PageMeta[]>("add_watermark", 
 export const cmdSetCrop = (boxes: number[][]) => cmd<PageMeta[]>("set_crop", { boxes });
 export const cmdSaveEncrypted = (target: string, userPassword: string, ownerPassword: string) =>
   cmd<CommitResult>("save_encrypted", { target, userPassword, ownerPassword });
-export const cmdSaveCompressed = (target: string) =>
-  cmd<{ before: number; after: number; result: CommitResult }>("save_compressed", { target });
+export const cmdSaveCompressed = (target: string, dpi?: number, quality?: number) =>
+  cmd<{ before: number; after: number; result: CommitResult; images: { images: number; before: number; after: number; skipped: number } }>("save_compressed", { target, dpi, quality });
 export interface AttachmentInfo {
   index: number;
   name: string;
@@ -116,7 +116,7 @@ export interface RedactReport {
 export const cmdRedact = (page: number, rect: number[]) => cmd<{ pages: PageMeta[]; report: RedactReport }>("redact_area", { page, rect });
 export interface PageObject {
   id: string;
-  kind: "text" | "image" | "graphic";
+  kind: "text" | "image" | "graphic" | "path";
   text: string;
   rect: [number, number, number, number];
   /** Text only: font name, size on the page (pt), fill colour. */
