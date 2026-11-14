@@ -374,9 +374,14 @@ fn interpret(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<Vec<u8>, FontInfo
 
 /// Full walk: text shows (with glyph geometry) and XObject draws.
 pub(crate) fn interpret_page(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<Vec<u8>, FontInfo>) -> Interpreted {
+    interpret_with(doc, ops, fonts, ID)
+}
+
+/// Walk content starting from a given CTM (a form XObject's content: Matrix × CTM at its Do).
+pub(crate) fn interpret_with(doc: &PdfDoc, ops: &[Operation], fonts: &BTreeMap<Vec<u8>, FontInfo>, ctm0: M) -> Interpreted {
     let mut out = Vec::new();
     let mut draws = Vec::new();
-    let mut ctm = ID;
+    let mut ctm = ctm0;
     let mut fill: Vec<Operation> = Vec::new();
     let mut stack: Vec<(M, TextState, Vec<Operation>)> = Vec::new();
     let mut ts = TextState::default();
@@ -971,7 +976,7 @@ fn edit_in_content(
         }
         let family = standard_font(&fi.base_font);
         let name = unique_font_name(&fonts);
-        let (font_obj, shown, used, bad) = replacement_font(doc, &fi.base_font, family, new_text);
+        let (font_obj, shown, used, bad) = replacement_font(doc, &fi.base_font, family, new_text, lead.size, lead.rise);
         let m = mul(&[1.0, 0.0, 0.0, 1.0, start_tx, 0.0], &lead.trm);
         ops.insert(0, Operation::new("q", vec![]));
         ops.push(Operation::new("Q", vec![]));
@@ -982,10 +987,9 @@ fn edit_in_content(
             Operation::new("Tf", vec![Object::Name(name.clone()), r(lead.size)]),
             Operation::new("Ts", vec![r(lead.rise)]),
             Operation::new("Tm", m.iter().map(|v| r(*v)).collect()),
-            Operation::new("Tj", vec![shown]),
-            Operation::new("ET", vec![]),
-            Operation::new("Q", vec![]),
         ]);
+        ops.extend(shown);
+        ops.extend([Operation::new("ET", vec![]), Operation::new("Q", vec![])]);
         new_page.set("Resources", Object::Dictionary(add_font_resource(doc, &page, &name, font_obj)));
         let mut note = format!(
             "{} lacks glyphs for the new text; replaced with {used}",
@@ -1009,12 +1013,14 @@ fn edit_in_content(
 /// Font + Tj operand for replacement text: a standard font when it has every
 /// letter; otherwise the original font if it is installed on this Mac, or an
 /// installed font of the same look (serif / sans / mono, bold, italic) that
-/// covers the text (Cyrillic, Greek, CJK…). Returns (font dict, operand, font
-/// name shown to the user, letters nothing could show).
-pub(crate) fn replacement_font(doc: &mut PdfDoc, original: &str, family: &str, text: &str) -> (Object, Object, String, Vec<char>) {
+/// covers the text (Cyrillic, Greek, CJK, Arabic, Hebrew, Indic… — shaped).
+/// Returns (font dict, show operators to follow `Tf size`, font name shown to
+/// the user, letters nothing could show). `rise` is the text rise in effect.
+pub(crate) fn replacement_font(doc: &mut PdfDoc, original: &str, family: &str, text: &str, size: f64, rise: f64) -> (Object, Vec<Operation>, String, Vec<char>) {
     let enc = std14_encode(text);
+    let tj = |b: Vec<u8>| vec![Operation::new("Tj", vec![Object::String(b, StringFormat::Literal)])];
     if enc.unsupported.is_empty() {
-        return (std14_font(family, &enc.diffs), Object::String(enc.bytes, StringFormat::Literal), family.to_string(), vec![]);
+        return (std14_font(family, &enc.diffs), tj(enc.bytes), family.to_string(), vec![]);
     }
     let orig = short(original);
     let installed = crate::fonts::find_face(&orig).filter(|f| crate::fonts::measure(f, text).map(|(_, m)| m.is_empty()).unwrap_or(false));
@@ -1023,11 +1029,11 @@ pub(crate) fn replacement_font(doc: &mut PdfDoc, original: &str, family: &str, t
         crate::fonts::fallback_face(text, lower.starts_with("times"), lower.starts_with("courier"), lower.contains("bold"), lower.contains("italic") || lower.contains("oblique"))
     });
     if let Some(face) = face {
-        if let Ok(e) = crate::fonts::embed_text(doc, face, text) {
-            return (Object::Reference(e.font), crate::fonts::hex_string(e.bytes), face.postscript.clone(), e.missing);
+        if let Ok(e) = crate::fonts::embed_text(doc, face, text, size, rise) {
+            return (Object::Reference(e.font), e.ops, face.postscript.clone(), e.missing);
         }
     }
-    (std14_font(family, &enc.diffs), Object::String(enc.bytes, StringFormat::Literal), family.to_string(), enc.unsupported)
+    (std14_font(family, &enc.diffs), tj(enc.bytes), family.to_string(), enc.unsupported)
 }
 
 fn short(base: &str) -> String {
@@ -1038,14 +1044,14 @@ fn short(base: &str) -> String {
 /// Legacy fallback: white patch over the run's box + Helvetica text.
 fn overlay(doc: &mut PdfDoc, page_id: ObjectId, req: &EditRequest, new_text: &str) -> Result<EditOutcome, EngineError> {
     let size = req.font_size.max(1.0);
-    let (font_obj, shown, used, bad) = replacement_font(doc, "Helvetica", "Helvetica", new_text);
+    let (font_obj, shown, used, bad) = replacement_font(doc, "Helvetica", "Helvetica", new_text, size, 0.0);
     let page = doc.get_object(page_id)?.as_dict()?.clone();
     let fonts: BTreeMap<Vec<u8>, FontInfo> = doc
         .get_page_fonts(page_id)
         .map(|f| f.into_iter().map(|(k, d)| (k, font_info(doc, d))).collect())
         .unwrap_or_default();
     let name = unique_font_name(&fonts);
-    let ops = vec![
+    let mut ops = vec![
         Operation::new("q", vec![]),
         Operation::new("rg", vec![1.into(), 1.into(), 1.into()]),
         Operation::new(
@@ -1063,10 +1069,9 @@ fn overlay(doc: &mut PdfDoc, page_id: ObjectId, req: &EditRequest, new_text: &st
         Operation::new("BT", vec![]),
         Operation::new("Tf", vec![Object::Name(name.clone()), Object::Real(size as f32)]),
         Operation::new("Td", vec![Object::Real(req.x as f32), Object::Real(req.y as f32)]),
-        Operation::new("Tj", vec![shown]),
-        Operation::new("ET", vec![]),
-        Operation::new("Q", vec![]),
     ];
+    ops.extend(shown);
+    ops.extend([Operation::new("ET", vec![]), Operation::new("Q", vec![])]);
     let data = Content { operations: ops }.encode()?;
     let sid = doc.add_object(Stream::new(dictionary! {}, data));
     let contents = match page.get(b"Contents") {

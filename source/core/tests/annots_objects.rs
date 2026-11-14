@@ -295,3 +295,140 @@ fn vector_paths_can_be_listed_moved_recoloured_and_deleted() {
     assert!(reload(&mut d).extract_text(&[1]).unwrap().contains("SECRET 1234"));
     let _ = line;
 }
+
+#[test]
+fn existing_annotations_are_recoloured_including_their_appearance() {
+    let mut d = doc();
+    for spec in [
+        AnnotSpec::Highlight { boxes: vec![[72.0, 698.0, 160.0, 712.0]], color: [1.0, 0.9, 0.0] },
+        AnnotSpec::Square { rect: [72.0, 300.0, 200.0, 380.0], color: RED, fill: Some([1.0, 1.0, 0.8]), width: 2.0 },
+        AnnotSpec::TextBox { rect: [72.0, 400.0, 300.0, 460.0], text: "Box".into(), size: 12.0, color: RED },
+        AnnotSpec::Stamp { rect: [350.0, 300.0, 550.0, 360.0], label: "Approved".into(), color: [0.1, 0.6, 0.2] },
+    ] {
+        annots::add(&mut d, 1, &spec).unwrap();
+    }
+    let blue = [0.1, 0.3, 0.9];
+    for (obj, _, _) in annots::rects(&d, 1) {
+        annots::recolor(&mut d, 1, obj, blue).unwrap();
+    }
+    let back = reload(&mut d);
+    let page = *back.get_pages().get(&1).unwrap();
+    for a in back.get_page_annotations(page).unwrap() {
+        let c: Vec<f64> = a.get(b"C").unwrap().as_array().unwrap().iter().map(|v| v.as_float().unwrap() as f64).collect();
+        assert!(c.iter().zip(blue).all(|(x, y)| (x - y).abs() < 0.01), "{c:?}");
+        let ap = a.get(b"AP").unwrap().as_dict().unwrap().get(b"N").unwrap().as_reference().unwrap();
+        let s = back.get_object(ap).unwrap().as_stream().unwrap();
+        let ops = Content::decode(&s.decompressed_content().unwrap()).unwrap().operations;
+        let has_blue = ops.iter().any(|o| matches!(o.operator.as_str(), "RG" | "rg") && o.operands.iter().zip(blue).all(|(v, b)| (v.as_float().unwrap() as f64 - b).abs() < 0.01));
+        let sub = a.get(b"Subtype").unwrap().as_name().unwrap().to_vec();
+        assert!(has_blue || sub == b"FreeText", "{} appearance drawn in the new colour", String::from_utf8_lossy(&sub));
+        if sub == b"Square" {
+            // The fill (/IC) is not the outline colour: kept.
+            assert!(ops.iter().any(|o| o.operator == "rg" && o.operands.iter().map(|v| v.as_float().unwrap()).collect::<Vec<_>>() == vec![1.0, 1.0, 0.8]), "fill kept");
+        }
+    }
+}
+
+#[test]
+fn shapes_inside_a_shared_form_xobject_are_edited_copy_on_write() {
+    use lopdf::{dictionary, Stream};
+    let mut d = doc();
+    let n = |v: f64| Object::Real(v as f32);
+    // A form with two shapes, placed with a translate and drawn on the page.
+    let form_ops = vec![
+        Operation::new("rg", vec![n(1.0), n(0.0), n(0.0)]), Operation::new("re", vec![n(0.0), n(0.0), n(40.0), n(20.0)]), Operation::new("f", vec![]),
+        Operation::new("RG", vec![n(0.0), n(0.0), n(1.0)]), Operation::new("m", vec![n(0.0), n(30.0)]), Operation::new("l", vec![n(40.0), n(30.0)]), Operation::new("S", vec![]),
+    ];
+    let form = d.add_object(Stream::new(
+        dictionary! { "Type" => "XObject", "Subtype" => "Form", "BBox" => vec![n(-500.0), n(-500.0), n(500.0), n(500.0)], "Matrix" => vec![n(1.0), n(0.0), n(0.0), n(1.0), n(100.0), n(0.0)] },
+        Content { operations: form_ops }.encode().unwrap(),
+    ));
+    let page = *d.get_pages().get(&1).unwrap();
+    let mut pd = d.get_object(page).unwrap().as_dict().unwrap().clone();
+    let mut res = pd.get(b"Resources").unwrap().as_dict().unwrap().clone();
+    let mut xo = res.get(b"XObject").unwrap().as_dict().unwrap().clone();
+    xo.set("Fm1", form);
+    res.set("XObject", xo);
+    pd.set("Resources", res);
+    d.objects.insert(page, Object::Dictionary(pd));
+    let mut c = Content::decode(&d.get_page_content(page)).unwrap();
+    c.operations.extend([Operation::new("q", vec![]), Operation::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(0.0), n(200.0)]), Operation::new("Do", vec!["Fm1".into()]), Operation::new("Q", vec![])]);
+    d.change_page_content(page, c.encode().unwrap()).unwrap();
+
+    let inner = |d: &PdfDoc| objects::list(d, 1).unwrap().into_iter().filter(|o| o.id.starts_with('f')).collect::<Vec<_>>();
+    let shapes = inner(&d);
+    assert_eq!(shapes.len(), 2, "{shapes:?}");
+    let rect = shapes.iter().find(|o| o.rect[1] < 205.0).unwrap().clone();
+    assert_eq!(rect.rect.map(|v| v.round()), [100.0, 200.0, 140.0, 220.0], "page-space box (form Matrix × cm)");
+
+    objects::translate(&mut d, 1, &[rect.id.clone()], 50.0, 10.0).unwrap();
+    let moved = inner(&d).into_iter().find(|o| (o.rect[0] - 150.0).abs() < 0.5).expect("moved inside the form");
+    assert_eq!(moved.rect.map(|v| v.round()), [150.0, 210.0, 190.0, 230.0]);
+    // The original form object is untouched (copy-on-write).
+    let orig = Content::decode(&d.get_object(form).unwrap().as_stream().unwrap().decompressed_content().unwrap()).unwrap();
+    assert_eq!(orig.operations.len(), 7, "shared form not modified");
+    let line = inner(&d).into_iter().find(|o| o.rect[1] > 225.0).unwrap();
+    objects::recolor(&mut d, 1, &[line.id.clone()], [0.0, 0.5, 0.0]).unwrap();
+    let line = inner(&d).into_iter().find(|o| o.rect[1] > 225.0).unwrap();
+    objects::delete(&mut d, 1, &[line.id]).unwrap();
+    assert_eq!(inner(&d).len(), 1, "line deleted, rectangle kept");
+    let back = reload(&mut d);
+    assert_eq!(objects::list(&back, 1).unwrap().into_iter().filter(|o| o.id.starts_with('f')).count(), 1, "survives save/reload");
+}
+
+/// Glyph codes shown by TJ arrays on page 1 that use 2-byte (embedded) fonts.
+fn shown_cids(d: &PdfDoc) -> Vec<Vec<u16>> {
+    let page = *d.get_pages().get(&1).unwrap();
+    let ops = Content::decode(&d.get_page_content(page)).unwrap().operations;
+    ops.iter()
+        .filter(|o| o.operator == "TJ")
+        .map(|o| {
+            o.operands[0]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|e| match e {
+                    Object::String(b, StringFormat::Hexadecimal) if b.len() == 2 => Some(u16::from_be_bytes([b[0], b[1]])),
+                    _ => None,
+                })
+                .collect::<Vec<u16>>()
+        })
+        .filter(|v| !v.is_empty())
+        .collect()
+}
+
+fn edit_public_line(d: &mut PdfDoc, new_text: &str) -> String {
+    let req = stitchup_core::textedit::EditRequest {
+        page: 1, x: 72.0, y: 680.0, width: 61.0, font_size: 12.0,
+        old_text: "Public line".into(), new_text: new_text.into(),
+    };
+    stitchup_core::textedit::edit_text(d, &req).unwrap().note
+}
+
+#[test]
+fn arabic_is_shaped_into_joining_forms_and_stays_extractable() {
+    if !stitchup_core::fonts::system_faces().iter().any(|f| f.family == "Geeza Pro" || f.family == "Arial") {
+        return;
+    }
+    let mut d = doc();
+    let note = edit_public_line(&mut d, "ببب");
+    let cids = shown_cids(&d).concat();
+    assert_eq!(cids.len(), 3, "{cids:?} ({note})");
+    let distinct: std::collections::HashSet<_> = cids.iter().collect();
+    assert!(distinct.len() >= 2, "initial / medial / final forms differ: {cids:?} ({note})");
+    let text = reload(&mut d).extract_text(&[1]).unwrap();
+    assert_eq!(text.matches('ب').count(), 3, "{text}");
+}
+
+#[test]
+fn devanagari_conjuncts_and_vowel_signs_are_shaped() {
+    if !stitchup_core::fonts::system_faces().iter().any(|f| f.family.contains("Devanagari")) {
+        return;
+    }
+    let mut d = doc();
+    let note = edit_public_line(&mut d, "क्षि");
+    let cids = shown_cids(&d).concat();
+    assert!(!cids.is_empty() && cids.len() < 4, "4 characters → fewer glyphs (conjunct): {cids:?} ({note})");
+    let text = reload(&mut d).extract_text(&[1]).unwrap();
+    assert!(text.contains('क') && text.contains('ष'), "{text}");
+}

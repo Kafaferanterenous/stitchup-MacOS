@@ -89,6 +89,7 @@ fn dispatch(st: &Mutex<SessionState>, cmd: &str, a: &Value) -> Result<Value, Val
         "tab_switch" => go!(tab_switch_inner(st, arg(a, "id").map_err(bad)?)),
         "tab_close" => go!(tab_close_inner(st, arg(a, "id").map_err(bad)?)),
         "move_pages_to_tab" => go!(move_pages_to_tab_inner(st, arg(a, "pages").map_err(bad)?, arg(a, "to").map_err(bad)?)),
+        "recolor_annotations" => go!(recolor_annotations_inner(st, arg(a, "page").map_err(bad)?, arg(a, "objs").map_err(bad)?, arg(a, "color").map_err(bad)?)),
         "list_system_fonts" => go!(Ok::<_, stitchup_core::EngineError>(list_system_fonts())),
         "ocr_recognize" => go!(ocr_recognize(arg(a, "b64").map_err(bad)?, arg(a, "languages").ok())),
         "ocr_apply" => go!(ocr_apply_inner(st, arg(a, "pages").map_err(bad)?)),

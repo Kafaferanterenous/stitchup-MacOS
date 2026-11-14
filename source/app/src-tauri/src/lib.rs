@@ -65,6 +65,7 @@ pub fn run() {
             commands::tab_close,
             commands::move_pages_to_tab,
             commands::list_system_fonts,
+            commands::recolor_annotations,
             commands::ocr_recognize,
             commands::ocr_apply,
             commands::save_recovery,

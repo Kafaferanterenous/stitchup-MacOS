@@ -1114,6 +1114,22 @@ pub fn move_annotation_inner(st: &Mutex<SessionState>, page: u32, obj: u32, dx: 
     logged(&mut g, "Move annotation", |doc| annots::translate(doc, page, obj, dx, dy).map(|_| ()))
 }
 
+/// Recolour annotations (several at once = one undo step).
+#[tauri::command]
+pub fn recolor_annotations(st: tauri::State<'_, Mutex<SessionState>>, page: u32, objs: Vec<u32>, color: [f64; 3]) -> Result<Vec<PageMeta>, EngineError> {
+    recolor_annotations_inner(&st, page, objs, color)
+}
+
+pub fn recolor_annotations_inner(st: &Mutex<SessionState>, page: u32, objs: Vec<u32>, color: [f64; 3]) -> Result<Vec<PageMeta>, EngineError> {
+    let mut g = lock(st)?;
+    logged(&mut g, "Recolour annotation", |doc| {
+        for o in &objs {
+            annots::recolor(doc, page, *o, color)?;
+        }
+        Ok(())
+    })
+}
+
 /// True redaction of a rectangle (PDF user space) on a page.
 #[tauri::command]
 pub fn redact_area(st: tauri::State<'_, Mutex<SessionState>>, page: u32, rect: [f64; 4]) -> Result<Value, EngineError> {

@@ -256,7 +256,7 @@ async function annotsOn(pageNo) {
   const doc = await pdfjs.getDocument({ data }).promise;
   const a = await (await doc.getPage(pageNo)).getAnnotations();
   await doc.destroy();
-  return a.map((x) => ({ subtype: x.subtype, contents: x.contentsObj?.str ?? "", url: x.url, dest: x.dest }));
+  return a.map((x) => ({ subtype: x.subtype, contents: x.contentsObj?.str ?? "", url: x.url, dest: x.dest, color: x.color ? [...x.color] : null }));
 }
 
 /** Drag with the mouse between two viewport points. */
@@ -909,6 +909,17 @@ await check("Select picks annotations too: delete the stamp", async () => {
   await page.waitForTimeout(200);
   const sb = await stamp.boundingBox();
   await page.mouse.click(sb.x + sb.width / 2, sb.y + sb.height / 2);
+  // Recolour the picked stamp (an existing annotation) with Fore.
+  await page.waitForSelector('[data-page="2"] .obj-box.annot.picked');
+  await rb("fore").click();
+  await page.locator('.color-palette [aria-label="#1d5fd0"]').click();
+  await waitStatus(/Recoloured 1 object/);
+  const st = (await annotsOn(2)).find((a) => a.subtype === "Stamp");
+  assert(st && st.color.join() === "29,95,208", `stamp colour ${st?.color}`);
+  await page.waitForSelector('[data-page="2"] .page-overlay[data-ready="true"]');
+  await page.waitForSelector('[data-page="2"] .obj-box.annot[title="Stamp"]');
+  const sb2 = await page.locator('[data-page="2"] .obj-box.annot[title="Stamp"]').boundingBox();
+  await page.mouse.click(sb2.x + sb2.width / 2, sb2.y + sb2.height / 2);
   await rb("objDelete").click();
   await waitStatus(/Deleted 1 object/);
   const after = await annotsOn(2);
@@ -1133,6 +1144,20 @@ await check("editing a line shows its font & size; the bar changes size, colour 
   await page.waitForFunction(() => [...document.querySelectorAll('[data-page="2"] .text-run')].some((s) => s.textContent.includes("Съешь")));
   const cy = (await ipc("list_objects", { page: 2 })).find((x) => x.text.includes("Съешь"));
   assert(cy && !cy.text.includes("?"), JSON.stringify(cy));
+  // Right-to-left, joined script: shaped with the font's rules.
+  const head = page.locator('[data-page="2"] .text-run', { hasText: "Heading for page 2" }).first();
+  await head.dblclick();
+  await page.locator(".inline-editor:not(.pending)").fill("مرحبا بالعالم");
+  await page.locator(".inline-editor").press("Enter");
+  await waitStatus(/Text edited|replaced with/);
+  const ar = await (async () => {
+    for (let i = 0; i < 40; i++) {
+      const o = (await ipc("list_objects", { page: 2 })).find((x) => /[\u0600-\u06ff]/.test(x.text));
+      if (o) return o;
+      await page.waitForTimeout(250);
+    }
+  })();
+  assert(ar && ["م", "ر", "ح", "ب", "ا", "ل", "ع"].every((c) => ar.text.includes(c)) && !ar.text.includes("?"), JSON.stringify(ar));
   await page.locator(".inline-editor").press("Escape").catch(() => {});
   await page.waitForFunction(() => !document.querySelector(".edit-bar"));
   // Close this tab without saving.

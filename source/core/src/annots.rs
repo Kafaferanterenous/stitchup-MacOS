@@ -521,3 +521,78 @@ pub fn rects(doc: &PdfDoc, page_no: u32) -> Vec<(u32, String, [f64; 4])> {
         })
         .collect()
 }
+
+/// Recolour an annotation: its /C colour, and every colour operator in its
+/// appearance (and FreeText /DA) that used the old colour. The annotation is
+/// replaced by an updated copy under a new object number (like `translate`).
+pub fn recolor(doc: &mut PdfDoc, page_no: u32, obj: u32, rgb: [f64; 3]) -> Result<u32, EngineError> {
+    let page = page_id(doc, page_no)?;
+    let mut annots = annots_of(doc, doc.get_object(page)?.as_dict()?);
+    let pos = annots
+        .iter()
+        .position(|a| a.as_reference().map(|r| r.0 == obj).unwrap_or(false))
+        .ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "annotation {obj} is not on page {page_no}"))?;
+    let old_id = annots[pos].as_reference()?;
+    let mut d = doc.get_object(old_id)?.as_dict()?.clone();
+    if matches!(d.get(b"Subtype").and_then(Object::as_name), Ok(b"Widget") | Ok(b"Popup") | Ok(b"Link")) {
+        return Err(crate::err!(ErrorCode::ValidationFailed, "form fields and links keep their colours"));
+    }
+    let nums = |o: &Object| -> Vec<f64> { o.as_array().map(|a| a.iter().filter_map(|v| v.as_float().ok().map(|f| f as f64)).collect()).unwrap_or_default() };
+    let old: Vec<f64> = d.get(b"C").map(nums).unwrap_or_default();
+    let new_obj = |c: &[f64; 3]| -> Vec<Object> { c.iter().map(|v| Object::Real(*v as f32)).collect() };
+    d.set("C", new_obj(&rgb));
+    let same = |v: &[f64]| old.len() == 3 && v.len() == 3 && v.iter().zip(&old).all(|(a, b)| (a - b).abs() < 0.004);
+
+    // Appearance stream: swap the old colour for the new one.
+    let ap_ref = d.get(b"AP").ok().and_then(|ap| ap.as_dict().ok()).and_then(|ap| ap.get(b"N").ok()).and_then(|n| n.as_reference().ok());
+    if let Some(r) = ap_ref {
+        if let Ok(Object::Stream(s)) = doc.get_object(r).cloned() {
+            if let Ok(content) = s.decompressed_content().and_then(|c| lopdf::content::Content::decode(&c)) {
+                let mut ops = content.operations;
+                let mut changed = false;
+                for op in ops.iter_mut() {
+                    if matches!(op.operator.as_str(), "RG" | "rg" | "SC" | "sc" | "SCN" | "scn") {
+                        let v: Vec<f64> = op.operands.iter().filter_map(|o| o.as_float().ok().map(|f| f as f64)).collect();
+                        // No old /C (e.g. a stamp drawn by another app): change the stroke colour.
+                        if same(&v) || (old.is_empty() && op.operator == "RG") {
+                            op.operands = new_obj(&rgb);
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    let mut ns = lopdf::Stream::new(s.dict.clone(), lopdf::content::Content { operations: ops }.encode()?);
+                    ns.dict.remove(b"Filter");
+                    ns.dict.remove(b"DecodeParms");
+                    let _ = ns.compress();
+                    let nid = doc.add_object(ns);
+                    let mut ap = d.get(b"AP")?.as_dict()?.clone();
+                    ap.set("N", nid);
+                    d.set("AP", ap);
+                }
+            }
+        }
+    }
+    // FreeText: text colour in /DA.
+    if let Ok(Object::String(da, f)) = d.get(b"DA").cloned() {
+        let da_s = String::from_utf8_lossy(&da).into_owned();
+        let toks: Vec<&str> = da_s.split_whitespace().collect();
+        if let Some(i) = toks.iter().position(|t| *t == "rg") {
+            if i >= 3 {
+                let v: Vec<f64> = toks[i - 3..i].iter().filter_map(|t| t.parse().ok()).collect();
+                if same(&v) || old.is_empty() {
+                    let mut t: Vec<String> = toks.iter().map(|s| s.to_string()).collect();
+                    for k in 0..3 {
+                        t[i - 3 + k] = format!("{:.3}", rgb[k]);
+                    }
+                    d.set("DA", Object::String(t.join(" ").into_bytes(), f));
+                }
+            }
+        }
+    }
+    d.set("M", now_date());
+    let new_id = doc.add_object(d);
+    annots[pos] = Object::Reference(new_id);
+    set_annots(doc, page, annots)?;
+    Ok(new_id.0)
+}

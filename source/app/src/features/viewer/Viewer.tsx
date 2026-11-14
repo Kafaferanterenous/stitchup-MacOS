@@ -214,6 +214,7 @@ function InlineEditor({
       readOnly={pending !== null}
       spellCheck={false}
       aria-label="Edit text"
+      dir="auto"
       style={{
         left: run.rect.x * zoom - 2,
         top: run.rect.y * zoom,

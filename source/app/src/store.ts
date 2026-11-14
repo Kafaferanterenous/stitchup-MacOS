@@ -38,6 +38,7 @@ import {
   cmdAddAnnotation,
   cmdDeleteAnnotation,
   cmdMoveAnnotation,
+  cmdRecolorAnnotations,
   cmdRedact,
   cmdObjectOp,
   cmdInsertShape,
@@ -657,7 +658,11 @@ export const store = {
   async pickColor(which: "fore" | "back" | "ann", hex: string | null) {
     if (which === "ann") {
       set({ annColor: hex });
-      notify(hex ? `Annotation colour ${hex} — used by the next highlight, underline, strike-out, pen, shape or text box` : "Annotation colours reset to defaults");
+      if (hex && (state.picked?.annots.length || state.picked?.objects.length)) {
+        await this.recolorPicked(hex);
+        return;
+      }
+      notify(hex ? `Annotation colour ${hex} — used by the next highlight, underline, strike-out, pen, shape or text box (select annotations to recolour them)` : "Annotation colours reset to defaults");
       return;
     }
     if (which === "back") {
@@ -667,11 +672,33 @@ export const store = {
     }
     if (!hex) return;
     set({ foreColor: hex });
-    if (state.picked?.objects.length || state.editingLine) {
+    if (state.picked?.annots.length) {
+      await this.recolorPicked(hex);
+    } else if (state.picked?.objects.length || state.editingLine) {
       await this.objectOp({ op: "recolor", color: rgb(hex) });
     } else {
       notify(`Text colour ${hex} — select text (or double-click a line) to recolour it; also used for new shape outlines`);
     }
+  },
+
+  /** Recolour everything the Select tool picked (text, shapes, annotations) — one undo step. */
+  async recolorPicked(hex: string) {
+    const p = state.picked;
+    const doc = state.doc;
+    if (!p || !doc) return false;
+    const n = p.objects.length + p.annots.length;
+    const ok = await this.command(
+      { kind: "object", before: doc.pages.map((x) => x.page_no), data: { recolor: hex } },
+      async () => {
+        let pages = null;
+        if (p.objects.length) pages = await cmdObjectOp(p.page, { op: "recolor", ids: p.objects, color: rgb(hex) });
+        if (p.annots.length) pages = await cmdRecolorAnnotations(p.page, p.annots, rgb(hex));
+        return pages!;
+      },
+      () => ({ status: `Recoloured ${n} object${n > 1 ? "s" : ""}`, page: p.page }),
+    );
+    set({ picked: null });
+    return ok;
   },
 
   setPicked(picked: AppState["picked"]) {

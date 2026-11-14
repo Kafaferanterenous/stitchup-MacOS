@@ -48,6 +48,7 @@ const SHIPPED: { id: string; name: string; use: string; license: string }[] = [
   { id: "—", name: "RustCrypto: rsa, x509-cert, cms, der, spki", use: "digital signatures (RSA-2048, X.509, PKCS#7)", license: "MIT / Apache-2.0" },
   { id: "—", name: "ttf-parser, subsetter", use: "installed fonts: read, subset and embed", license: "MIT / Apache-2.0" },
   { id: "—", name: "jpeg-decoder, jpeg-encoder", use: "Compress: smaller images", license: "MIT / Apache-2.0" },
+  { id: "—", name: "rustybuzz, unicode-bidi", use: "text shaping (Arabic, Hebrew, Indic…) and right-to-left order", license: "MIT / Apache-2.0" },
   { id: "—", name: "objc2 (app-kit, web-kit, foundation)", use: "native print settings", license: "MIT" },
   { id: "—", name: "Apple Vision (macOS)", use: "text recognition (OCR), on this Mac", license: "part of macOS" },
 ];

@@ -169,8 +169,20 @@ pub fn fallback_face(text: &str, serif: bool, mono: bool, bold: bool, italic: bo
         }
     }
     // Any face that covers the text (CJK: Hiragino / PingFang / Arial Unicode…).
-    let cjk = text.chars().any(|c| ('\u{2e80}'..='\u{9fff}').contains(&c) || ('\u{ac00}'..='\u{d7af}').contains(&c));
-    let preferred: &[&str] = if cjk { &["Hiragino Sans", "Hiragino Sans GB", "PingFang SC", "Apple SD Gothic Neo", "Arial Unicode MS"] } else { &["Arial Unicode MS"] };
+    let has = |lo: char, hi: char| text.chars().any(|c| (lo..=hi).contains(&c));
+    let preferred: &[&str] = if has('\u{2e80}', '\u{9fff}') || has('\u{ac00}', '\u{d7af}') {
+        &["Hiragino Sans", "Hiragino Sans GB", "PingFang SC", "Apple SD Gothic Neo", "Arial Unicode MS"]
+    } else if has('\u{0600}', '\u{06ff}') {
+        &["Geeza Pro", "Arial", "Times New Roman", "Baghdad", "Damascus"]
+    } else if has('\u{0590}', '\u{05ff}') {
+        &["Arial Hebrew", "Arial", "Times New Roman", "Lucida Grande"]
+    } else if has('\u{0900}', '\u{097f}') {
+        &["Kohinoor Devanagari", "ITF Devanagari", "Devanagari Sangam MN", "Devanagari MT"]
+    } else if has('\u{0e00}', '\u{0e7f}') {
+        &["Thonburi", "Ayuthaya", "Sukhumvit Set"]
+    } else {
+        &["Arial Unicode MS"]
+    };
     for fam in preferred {
         if let Some(f) = face_in_family(fam, bold, italic) {
             if covers(f) {
@@ -181,16 +193,98 @@ pub fn fallback_face(text: &str, serif: bool, mono: bool, bold: bool, italic: bo
     system_faces().iter().filter(|f| !f.bold && !f.italic).find(|f| covers(f))
 }
 
-/// Text set in an embedded subset font.
+/// Text set in an embedded subset font, ready to follow a `Tf`.
 pub struct EmbeddedText {
     /// Font dictionary (Type0) — put it in the page /Font resources.
     pub font: ObjectId,
-    /// 2-byte codes (CIDs) to show with Tj.
-    pub bytes: Vec<u8>,
-    /// Advance of the whole text at size 1, in text space (sum of widths / 1000).
+    /// Show operators: `TJ` arrays (and `Ts` where shaping moves marks up / down).
+    pub ops: Vec<lopdf::content::Operation>,
+    /// Advance of the whole text at size 1, in text space.
     pub advance: f64,
     /// Characters the font has no glyph for (shown as the font's blank glyph).
     pub missing: Vec<char>,
+}
+
+/// One shaped glyph, in visual (left-to-right drawing) order.
+struct Shaped {
+    gid: u16,
+    /// Shaped advance and offsets, in font units.
+    x_advance: i32,
+    x_offset: i32,
+    y_offset: i32,
+    /// The text this glyph stands for (first glyph of a cluster), for ToUnicode.
+    text: String,
+}
+
+/// Shape `text` with the font's OpenType rules (ligatures, Arabic joining,
+/// Indic reordering, mark positioning) in Unicode bidi visual order.
+/// Also returns whether shaping changed order or glyph count (then the show is
+/// wrapped in /ActualText so copy & search get the logical text).
+fn shape(data: &[u8], index: u32, text: &str) -> Option<(Vec<Shaped>, bool)> {
+    let face = rustybuzz::Face::from_slice(data, index)?;
+    let cmap_face = ttf_parser::Face::parse(data, index).ok()?;
+    let mut complex = false;
+    let bidi = unicode_bidi::BidiInfo::new(text, None);
+    let mut out = vec![];
+    for para in &bidi.paragraphs {
+        let line = para.range.clone();
+        let (levels, runs) = bidi.visual_runs(para, line);
+        for run in runs {
+            let rtl = levels[run.start].is_rtl();
+            complex |= rtl;
+            let piece = &text[run.clone()];
+            let mut buf = rustybuzz::UnicodeBuffer::new();
+            buf.push_str(piece);
+            buf.set_direction(if rtl { rustybuzz::Direction::RightToLeft } else { rustybuzz::Direction::LeftToRight });
+            buf.guess_segment_properties();
+            let shaped = rustybuzz::shape(&face, &[], buf);
+            let infos = shaped.glyph_infos();
+            let pos = shaped.glyph_positions();
+            // Cluster boundaries (byte offsets into `piece`) → text per cluster.
+            let mut bounds: Vec<usize> = infos.iter().map(|g| g.cluster as usize).collect();
+            bounds.push(piece.len());
+            bounds.sort_unstable();
+            bounds.dedup();
+            // ToUnicode text per glyph: a glyph that IS a character's own glyph
+            // maps to that character; the cluster's other characters go to its
+            // first remaining glyph (ligatures, conjuncts). No duplicates.
+            let mut texts: Vec<String> = vec![String::new(); infos.len()];
+            let mut clusters: Vec<usize> = infos.iter().map(|g| g.cluster as usize).collect();
+            clusters.sort_unstable();
+            clusters.dedup();
+            for c in clusters {
+                let next = bounds.iter().copied().find(|b| *b > c).unwrap_or(piece.len());
+                let chars: Vec<char> = piece.get(c..next).unwrap_or("").chars().collect();
+                let members: Vec<usize> = (0..infos.len()).filter(|i| infos[*i].cluster as usize == c).collect();
+                let mut used = vec![false; chars.len()];
+                for &i in &members {
+                    if let Some(k) = chars.iter().enumerate().position(|(k, ch)| !used[k] && cmap_face.glyph_index(*ch).map(|g| g.0 as u32) == Some(infos[i].glyph_id)) {
+                        used[k] = true;
+                        texts[i] = chars[k].to_string();
+                    }
+                }
+                let rest: String = chars.iter().zip(&used).filter(|(_, u)| !**u).map(|(c, _)| *c).collect();
+                if !rest.is_empty() {
+                    complex |= chars.len() > 1;
+                    match members.iter().find(|i| texts[**i].is_empty()) {
+                        Some(&i) => texts[i] = rest,
+                        None => {
+                            if let Some(&i) = members.first() {
+                                texts[i].push_str(&rest);
+                            }
+                        }
+                    }
+                }
+                if members.len() != chars.len() {
+                    complex = true;
+                }
+            }
+            for ((g, p), t) in infos.iter().zip(pos).zip(texts) {
+                out.push(Shaped { gid: g.glyph_id as u16, x_advance: p.x_advance, x_offset: p.x_offset, y_offset: p.y_offset, text: t });
+            }
+        }
+    }
+    Some((out, complex))
 }
 
 /// Measure `text` in `face` (advance at size 1, in text space) and which chars it lacks.
@@ -218,45 +312,89 @@ fn subset_tag(seed: &[u8]) -> String {
     h.bytes().take(6).map(|b| (b'A' + b % 26) as char).collect()
 }
 
-/// Embed the glyphs `text` needs from `face` and encode the text for them.
-pub fn embed_text(doc: &mut PdfDoc, face: &SystemFace, text: &str) -> Result<EmbeddedText, EngineError> {
+/// Embed the glyphs `text` needs from `face` (shaped) and build its show
+/// operators. `size` is the Tf size and `rise` the text rise in effect, so
+/// marks moved up / down by the font come out in the right place.
+pub fn embed_text(doc: &mut PdfDoc, face: &SystemFace, text: &str, size: f64, rise: f64) -> Result<EmbeddedText, EngineError> {
+    use lopdf::content::Operation;
     let data = std::fs::read(&face.path)?;
     let f = ttf_parser::Face::parse(&data, face.index).map_err(|e| crate::err!(ErrorCode::IoError, "font {}: {e}", face.postscript))?;
     let upm = f.units_per_em() as f64;
     let scale = 1000.0 / upm;
+    let (glyphs, complex) = shape(&data, face.index, text).ok_or_else(|| crate::err!(ErrorCode::IoError, "can't shape with {}", face.postscript))?;
+    let missing: Vec<char> = {
+        let mut m = vec![];
+        for c in text.chars() {
+            if !c.is_whitespace() && f.glyph_index(c).is_none() && !m.contains(&c) {
+                m.push(c);
+            }
+        }
+        m
+    };
 
     let mut remap = subsetter::GlyphRemapper::new();
     remap.remap(0); // .notdef stays glyph 0
-    let mut glyphs: Vec<(char, u16)> = vec![];
-    let mut missing = vec![];
-    for c in text.chars() {
-        let g = match f.glyph_index(c) {
-            Some(g) => g.0,
-            None => {
-                if !missing.contains(&c) {
-                    missing.push(c);
-                }
-                0
-            }
-        };
-        remap.remap(g);
-        glyphs.push((c, g));
+    for g in &glyphs {
+        remap.remap(g.gid);
     }
     let sub = subsetter::subset(&data, face.index, &remap).map_err(|e| crate::err!(ErrorCode::Unsupported, "can't embed {}: {e:?}", face.postscript))?;
 
-    let mut bytes = Vec::with_capacity(glyphs.len() * 2);
+    // Show operators: TJ arrays where numbers fix up the pen so each glyph
+    // lands at its shaped position; a new segment (with Ts) when y changes.
+    let mut ops: Vec<Operation> = vec![];
+    let mut arr: Vec<Object> = vec![];
+    let mut pending = 0.0f64; // TJ adjustment (thousandths of text space) not yet written
+    let mut cur_y = 0;
     let mut advance = 0.0;
     let mut widths: std::collections::BTreeMap<u16, f64> = Default::default();
-    let mut to_unicode: std::collections::BTreeMap<u16, char> = Default::default();
-    for (c, g) in &glyphs {
-        let cid = remap.get(*g).unwrap_or(0);
-        bytes.extend_from_slice(&cid.to_be_bytes());
-        let w = f.glyph_hor_advance(ttf_parser::GlyphId(*g)).unwrap_or(0) as f64 * scale;
-        advance += w / 1000.0;
-        widths.insert(cid, w);
-        if *g != 0 {
-            to_unicode.entry(cid).or_insert(*c);
+    let mut to_unicode: std::collections::BTreeMap<u16, String> = Default::default();
+    let flush = |ops: &mut Vec<Operation>, arr: &mut Vec<Object>| {
+        if !arr.is_empty() {
+            ops.push(Operation::new("TJ", vec![Object::Array(std::mem::take(arr))]));
         }
+    };
+    for g in &glyphs {
+        let cid = remap.get(g.gid).unwrap_or(0);
+        let w = f.glyph_hor_advance(ttf_parser::GlyphId(g.gid)).unwrap_or(0) as f64 * scale;
+        widths.insert(cid, w);
+        if !g.text.is_empty() && g.gid != 0 {
+            to_unicode.entry(cid).or_insert_with(|| g.text.clone());
+        }
+        if g.y_offset != 0 || cur_y != 0 {
+            if g.y_offset != cur_y {
+                if pending.abs() > 0.01 {
+                    arr.push(Object::Real(pending as f32));
+                    pending = 0.0;
+                }
+                flush(&mut ops, &mut arr);
+                cur_y = g.y_offset;
+                ops.push(Operation::new("Ts", vec![Object::Real((rise + cur_y as f64 / upm * size) as f32)]));
+            }
+        }
+        // Move right by x_offset before the glyph, then to the shaped advance after it.
+        pending -= g.x_offset as f64 * scale;
+        if pending.abs() > 0.01 {
+            arr.push(Object::Real(pending as f32));
+        }
+        arr.push(Object::String(cid.to_be_bytes().to_vec(), StringFormat::Hexadecimal));
+        pending = -((g.x_advance - g.x_offset) as f64 * scale - w);
+        advance += g.x_advance as f64 / upm;
+    }
+    if pending.abs() > 0.01 {
+        arr.push(Object::Real(pending as f32));
+    }
+    flush(&mut ops, &mut arr);
+    if cur_y != 0 {
+        ops.push(Operation::new("Ts", vec![Object::Real(rise as f32)]));
+    }
+    if complex {
+        // Logical text for copy / search where glyph order ≠ reading order.
+        let mut utf16 = vec![0xFE, 0xFF];
+        for u in text.encode_utf16() {
+            utf16.extend_from_slice(&u.to_be_bytes());
+        }
+        ops.insert(0, Operation::new("BDC", vec![Object::Name(b"Span".to_vec()), Object::Dictionary(dictionary! { "ActualText" => Object::String(utf16, StringFormat::Hexadecimal) })]));
+        ops.push(Operation::new("EMC", vec![]));
     }
 
     // Font program: TrueType outlines → FontFile2; CFF → the CFF table as FontFile3.
@@ -331,9 +469,8 @@ pub fn embed_text(doc: &mut PdfDoc, face: &SystemFace, text: &str) -> Result<Emb
     let entries: Vec<_> = to_unicode.iter().collect();
     for chunk in entries.chunks(100) {
         cmap.push_str(&format!("{} beginbfchar\n", chunk.len()));
-        for (cid, c) in chunk {
-            let mut u = [0u16; 2];
-            let hex: String = c.encode_utf16(&mut u).iter().map(|x| format!("{x:04X}")).collect();
+        for (cid, t) in chunk {
+            let hex: String = t.encode_utf16().map(|x| format!("{x:04X}")).collect();
             cmap.push_str(&format!("<{cid:04X}> <{hex}>\n"));
         }
         cmap.push_str("endbfchar\n");
@@ -351,7 +488,7 @@ pub fn embed_text(doc: &mut PdfDoc, face: &SystemFace, text: &str) -> Result<Emb
         "DescendantFonts" => vec![Object::Reference(cid_id)],
         "ToUnicode" => tu_id,
     });
-    Ok(EmbeddedText { font, bytes, advance, missing })
+    Ok(EmbeddedText { font, ops, advance, missing })
 }
 
 /// The `Tj` operand for embedded text.

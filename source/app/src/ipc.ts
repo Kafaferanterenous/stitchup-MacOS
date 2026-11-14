@@ -106,6 +106,7 @@ export const cmdTakePendingOpen = () => cmd<string[]>("take_pending_open");
 // ---- annotations, objects, redaction, signatures
 export const cmdAddAnnotation = (page: number, spec: unknown) => cmd<PageMeta[]>("add_annotation", { page, spec });
 export const cmdDeleteAnnotation = (page: number, obj: number) => cmd<PageMeta[]>("delete_annotation", { page, obj });
+export const cmdRecolorAnnotations = (page: number, objs: number[], color: number[]) => cmd<PageMeta[]>("recolor_annotations", { page, objs, color });
 export const cmdMoveAnnotation = (page: number, obj: number, dx: number, dy: number) => cmd<PageMeta[]>("move_annotation", { page, obj, dx, dy });
 export interface RedactReport {
   glyphs_removed: number;

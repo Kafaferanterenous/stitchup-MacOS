@@ -32,7 +32,9 @@ not notarized. The first time you open it, right-click it and choose
   the line is redrawn in the closest standard font, with full Polish and other
   Central European letters (ą ć ę ł ń ó ś ź ż). Letters no standard font
   has (Cyrillic, Greek, Chinese, Japanese…) are set in an installed font of
-  the same style. While you edit, a bar above the line shows its font and
+  the same style. Arabic and Hebrew (right to left), Hindi and other Indic
+  scripts, and Thai are shaped properly: letters join, conjuncts form, and
+  marks sit in the right place. While you edit, a bar above the line shows its font and
   size and lets you change font, bold, italic, size and colour. Any font
   installed on your Mac can be used; only the letters used are embedded.
 - **Annotate:** highlight, underline and strike-out snap to the text. Also
@@ -41,7 +43,8 @@ not notarized. The first time you open it, right-click it and choose
   in Preview and Acrobat.
 - **Redact:** what is under the box is removed from the file, not just covered.
 - **Content tools:** select, move and delete text, images, shapes (lines,
-  rectangles, filled areas) and annotations.
+  rectangles, filled areas, also inside grouped drawings) and annotations.
+  Recolour selected text, shapes and existing annotations.
   Recolour text, change its font and size, insert images (PNG with
   transparency, JPEG, HEIC…) and draw vector shapes.
 - **Forms:** fill text fields, checkboxes, radio buttons and drop-downs.

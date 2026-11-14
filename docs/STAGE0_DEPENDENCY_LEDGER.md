@@ -392,3 +392,5 @@ Notes:
   only embedded when their OS/2 fsType allows it.
 - **Update 2026-11-14 (v0.8.0):** added `jpeg-decoder` 0.3 and `jpeg-encoder` 0.6
   (both MIT / Apache-2.0) for Compress ▸ image downsampling.
+- **Update 2026-11-14 (v0.9.0):** added `rustybuzz` 0.20 (MIT; HarfBuzz port) and
+  `unicode-bidi` 0.3 (MIT / Apache-2.0) for complex-script shaping and bidi order.

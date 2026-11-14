@@ -1075,3 +1075,18 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
 - User suggested studying open-source PDF apps (pdfcraft etc.): noted — use for ideas where useful,
   mind licences (GPL/AGPL code can't be pasted into this MIT/Apache project).
 - TESTS: core 51, command layer 9, e2e 77/77.
+
+2026-11-14 — v0.9.0: RECOLOUR ANNOTATIONS, SHAPES IN FORM XOBJECTS, COMPLEX-SCRIPT SHAPING
+- annots::recolor: new /C; appearance stream colour ops equal to the old /C (RG/rg/SC/sc/SCN/scn)
+  swapped (fill /IC kept); FreeText /DA colour; replaced by a copy under a new id (like translate).
+  Select ▸ Fore or Annotate ▸ Colour recolours picked annotations (store.recolorPicked, one step).
+- Form XObjects: interpret_with(ctm0 = Matrix × CTM at Do) lists their paths as "f<draw>_<path>";
+  edits copy the form (new stream, new /StFxN name in the page resources, the Do renamed) so
+  other placements keep the original.
+- Shaping: rustybuzz per unicode-bidi visual run; TJ numbers place each glyph at its shaped
+  advance/offset (pending = −(x_adv − x_off)·k + w), Ts segments for y offsets; ToUnicode maps a
+  glyph to its own character when it is that character's cmap glyph, cluster remainder to the first
+  other glyph (no duplicates); /Span <</ActualText>> BDC…EMC when order or count changed.
+  Fallback picks by script (Geeza Pro/Arial, Arial Hebrew, Kohinoor Devanagari, Thonburi…).
+  Inline editor dir="auto" for RTL typing. Visual check: PDFKit render of AR/HE/HI/TH/RU/EL/ZH.
+- TESTS: core 55, command layer 9, e2e 77/77.
