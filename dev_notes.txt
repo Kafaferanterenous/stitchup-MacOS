@@ -1090,3 +1090,20 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
   Fallback picks by script (Geeza Pro/Arial, Arial Hebrew, Kohinoor Devanagari, Thonburi…).
   Inline editor dir="auto" for RTL typing. Visual check: PDFKit render of AR/HE/HI/TH/RU/EL/ZH.
 - TESTS: core 55, command layer 9, e2e 77/77.
+
+2026-11-14 — v0.10.0: GROUPS ANY DEPTH + TEXT IN GROUPS, INTERNATIONAL SIGNATURES, FONT FIXES
+- objects.rs rewritten around content scopes (page + form XObjects to depth 4, parents first,
+  own or inherited resources, ctm0 = Matrix × CTM at Do). Ids: "t12" on the page,
+  "f12.4:t7" inside groups. edit_objects() runs delete / move / recolour / font for text, images and
+  shapes in any scope; write_edits() copies changed forms bottom-up (new StFxN names) so shared
+  originals stay. textedit::edit_ops() edits a run in any content (page or group); edit_text tries
+  the page, then groups, then the old overlay.
+- Font scan: Apple .ttc faces keep PostScript names in Mac Roman records — now decoded (411 faces /
+  138 families, was 99 families; Helvetica Neue had only Thin faces, so "bold" picked Thin). Italic
+  also from the style name.
+- Per-character font fallback (fonts::font_runs / visual_font_runs): the line in the main font of
+  the right look, fallback faces only for letters it lacks; bidi visual order is computed for the
+  whole line before splitting by font (Arabic phrase order across a dash was wrong otherwise).
+- Signature box lines use the same fallback (Cyrillic, Greek, CJK names) and Tz to fit the width.
+- Flaky sign test fixed: openssl helper shared one temp folder across parallel test threads.
+- TESTS: core 60, command layer 9, e2e 77/77.

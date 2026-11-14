@@ -126,6 +126,7 @@ struct PageContent {
     ops: Vec<Operation>,
     fonts: BTreeMap<Vec<u8>, FontInfo>,
     parsed: Interpreted,
+    #[allow(dead_code)]
     xobjects: HashMap<Vec<u8>, bool>, // name → is image
 }
 
@@ -186,110 +187,28 @@ fn path_recolor(p: &PathObj, ops: &[Operation], repl: &mut HashMap<usize, Vec<Op
     repl.insert(p.op, vec![ops[p.op].clone(), Operation::new("Q", vec![])]);
 }
 
-/// A form XObject drawn directly on the page, with the paths inside it.
-struct FormContent {
-    draw: usize,
-    id: ObjectId,
-    ops: Vec<Operation>,
-    paths: Vec<PathObj>,
-}
-
 fn page_xobjects(doc: &PdfDoc, page: ObjectId) -> lopdf::Dictionary {
-    match crate::model::inherited(doc, page, b"Resources") {
-        Some(Object::Dictionary(res)) => match res.get(b"XObject") {
-            Ok(Object::Dictionary(d)) => d.clone(),
-            Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().unwrap_or_default(),
-            _ => Default::default(),
-        },
-        Some(Object::Reference(r)) => doc
-            .get_object(*r)
-            .and_then(Object::as_dict)
-            .ok()
-            .and_then(|res| match res.get(b"XObject") {
-                Ok(Object::Dictionary(d)) => Some(d.clone()),
-                Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().ok(),
-                _ => None,
-            })
-            .unwrap_or_default(),
+    match page_resources(doc, page).get(b"XObject") {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().unwrap_or_default(),
         _ => Default::default(),
     }
 }
 
-fn forms(doc: &PdfDoc, pc: &PageContent) -> Vec<FormContent> {
-    let xo = page_xobjects(doc, pc.page);
-    let mut out = vec![];
-    for d in &pc.parsed.draws {
-        let Ok(Object::Reference(id)) = xo.get(&d.name) else { continue };
-        let Ok(Object::Stream(s)) = doc.get_object(*id) else { continue };
-        if s.dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Form".as_slice()) {
-            continue;
-        }
-        let Ok(ops) = s.decompressed_content().and_then(|c| Content::decode(&c)).map(|c| c.operations) else { continue };
-        let matrix: M = match s.dict.get(b"Matrix").and_then(Object::as_array) {
-            Ok(a) if a.len() == 6 => {
-                let v: Vec<f64> = a.iter().filter_map(|o| o.as_float().ok().map(|f| f as f64)).collect();
-                if v.len() == 6 { [v[0], v[1], v[2], v[3], v[4], v[5]] } else { [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }
-            }
-            _ => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        };
-        let parsed = interpret_with(doc, &ops, &BTreeMap::new(), mul(&matrix, &d.ctm));
-        out.push(FormContent { draw: d.op, id: *id, ops, paths: parsed.paths });
+fn page_resources(doc: &PdfDoc, page: ObjectId) -> lopdf::Dictionary {
+    match crate::model::inherited(doc, page, b"Resources") {
+        Some(Object::Dictionary(d)) => d.clone(),
+        Some(Object::Reference(r)) => doc.get_object(*r).and_then(Object::as_dict).cloned().unwrap_or_default(),
+        _ => Default::default(),
     }
-    out
 }
 
-/// "f<draw op>_<path op>" ids → (draw op, path op).
-fn parse_form_ids(ids: &[String]) -> Vec<(usize, usize)> {
-    ids.iter()
-        .filter_map(|id| {
-            let rest = id.strip_prefix('f')?;
-            let (a, b) = rest.split_once('_')?;
-            Some((a.parse().ok()?, b.parse().ok()?))
-        })
-        .collect()
-}
-
-/// Apply `act` to the selected paths inside forms. Each edited form is
-/// COPIED (copy-on-write) under a new XObject name used only by this draw,
-/// so other pages / placements sharing the form keep the original.
-/// Returns how many paths changed and the new XObject resources to add.
-fn edit_form_paths(
-    doc: &mut PdfDoc,
-    pc: &PageContent,
-    ids: &[String],
-    repl: &mut HashMap<usize, Vec<Operation>>,
-    act: &dyn Fn(&PathObj, &[Operation], &mut HashMap<usize, Vec<Operation>>),
-) -> Result<(usize, Vec<(Vec<u8>, ObjectId)>), EngineError> {
-    let wanted = parse_form_ids(ids);
-    if wanted.is_empty() {
-        return Ok((0, vec![]));
+fn sub_dict(doc: &PdfDoc, res: &lopdf::Dictionary, key: &[u8]) -> lopdf::Dictionary {
+    match res.get(key) {
+        Ok(Object::Dictionary(d)) => d.clone(),
+        Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().unwrap_or_default(),
+        _ => Default::default(),
     }
-    let all = forms(doc, pc);
-    let taken: std::collections::HashSet<Vec<u8>> = page_xobjects(doc, pc.page).iter().map(|(k, _)| k.clone()).collect();
-    let mut added: Vec<(Vec<u8>, ObjectId)> = vec![];
-    let mut n = 0;
-    for f in &all {
-        let mine: Vec<&PathObj> = wanted.iter().filter(|(d, _)| *d == f.draw).filter_map(|(_, p)| f.paths.iter().find(|x| x.op == *p)).collect();
-        if mine.is_empty() {
-            continue;
-        }
-        let mut frepl = HashMap::new();
-        for p in &mine {
-            act(p, &f.ops, &mut frepl);
-        }
-        n += mine.len();
-        let Ok(Object::Stream(orig)) = doc.get_object(f.id).cloned() else { continue };
-        let mut dict = orig.dict.clone();
-        dict.remove(b"Filter");
-        dict.remove(b"DecodeParms");
-        let mut ns = Stream::new(dict, Content { operations: rebuild(&f.ops, frepl) }.encode()?);
-        let _ = ns.compress();
-        let nid = doc.add_object(ns);
-        let name = (1..).map(|k| format!("StFx{k}").into_bytes()).find(|k| !taken.contains(k) && !added.iter().any(|(a, _)| a == k)).unwrap();
-        repl.insert(f.draw, vec![Operation::new("Do", vec![Object::Name(name.clone())])]);
-        added.push((name, nid));
-    }
-    Ok((n, added))
 }
 
 /// Add XObject entries to the page's own /Resources.
@@ -297,11 +216,7 @@ fn add_xobjects(doc: &mut PdfDoc, page: ObjectId, entries: Vec<(Vec<u8>, ObjectI
     if entries.is_empty() {
         return Ok(());
     }
-    let mut res = match crate::model::inherited(doc, page, b"Resources") {
-        Some(Object::Dictionary(d)) => d.clone(),
-        Some(Object::Reference(r)) => doc.get_object(*r).and_then(Object::as_dict).cloned().unwrap_or_default(),
-        _ => Default::default(),
-    };
+    let mut res = page_resources(doc, page);
     let mut xo = page_xobjects(doc, page);
     for (k, id) in entries {
         xo.set(k, Object::Reference(id));
@@ -325,15 +240,271 @@ fn rebuild(ops: &[Operation], repl: HashMap<usize, Vec<Operation>>) -> Vec<Opera
     out
 }
 
-pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> {
+// ------------------------------------------------- content scopes (page + groups)
+
+/// Nesting depth of grouped drawings (form XObjects) opened for selection.
+const MAX_DEPTH: usize = 4;
+
+/// One content stream: the page itself (`chain` empty) or a form XObject
+/// reached by the draw ops in `chain` (page op, then op inside that form, …).
+struct Scope {
+    chain: Vec<usize>,
+    form: Option<ObjectId>,
+    ops: Vec<Operation>,
+    fonts: BTreeMap<Vec<u8>, FontInfo>,
+    parsed: Interpreted,
+    /// Resources in effect (a form without its own uses its parent's).
+    resources: lopdf::Dictionary,
+    /// True when `resources` is the form's own dictionary.
+    own_resources: bool,
+    /// CTM when this content starts drawing (page: identity).
+    ctm0: M,
+}
+
+fn fonts_of(doc: &PdfDoc, res: &lopdf::Dictionary) -> BTreeMap<Vec<u8>, FontInfo> {
+    sub_dict(doc, res, b"Font")
+        .iter()
+        .filter_map(|(k, v)| {
+            let d = match v {
+                Object::Reference(id) => doc.get_object(*id).and_then(Object::as_dict).ok()?,
+                Object::Dictionary(d) => d,
+                _ => return None,
+            };
+            Some((k.clone(), font_info(doc, d)))
+        })
+        .collect()
+}
+
+fn form_matrix(s: &Stream) -> M {
+    match s.dict.get(b"Matrix").and_then(Object::as_array) {
+        Ok(a) if a.len() == 6 => {
+            let v: Vec<f64> = a.iter().filter_map(|o| o.as_float().ok().map(|f| f as f64)).collect();
+            if v.len() == 6 { [v[0], v[1], v[2], v[3], v[4], v[5]] } else { [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }
+        }
+        _ => [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    }
+}
+
+/// The page and every grouped drawing on it (to MAX_DEPTH), parents first.
+fn scopes(doc: &PdfDoc, pc: &PageContent) -> Vec<Scope> {
+    let page_res = page_resources(doc, pc.page);
+    let mut out = vec![Scope {
+        chain: vec![],
+        form: None,
+        ops: pc.ops.clone(),
+        fonts: pc.fonts.clone(),
+        parsed: interpret_page(doc, &pc.ops, &pc.fonts),
+        resources: page_res,
+        own_resources: true,
+        ctm0: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    }];
+    let mut i = 0;
+    while i < out.len() {
+        if out[i].chain.len() < MAX_DEPTH {
+            let xo = sub_dict(doc, &out[i].resources, b"XObject");
+            let mut kids = vec![];
+            for d in &out[i].parsed.draws {
+                let Ok(Object::Reference(id)) = xo.get(&d.name) else { continue };
+                let Ok(Object::Stream(s)) = doc.get_object(*id) else { continue };
+                if s.dict.get(b"Subtype").and_then(Object::as_name).ok() != Some(b"Form".as_slice()) {
+                    continue;
+                }
+                // A form drawing itself (directly or not) is not followed.
+                if out[i].form == Some(*id) || out.iter().any(|sc| sc.form == Some(*id) && out[i].chain.starts_with(&sc.chain)) {
+                    continue;
+                }
+                let Ok(ops) = s.decompressed_content().and_then(|c| Content::decode(&c)).map(|c| c.operations) else { continue };
+                let (resources, own) = match s.dict.get(b"Resources") {
+                    Ok(Object::Dictionary(r)) => (r.clone(), true),
+                    Ok(Object::Reference(r)) => (doc.get_object(*r).and_then(Object::as_dict).cloned().unwrap_or_default(), true),
+                    _ => (out[i].resources.clone(), false),
+                };
+                let fonts = if own && resources.get(b"Font").is_ok() { fonts_of(doc, &resources) } else { out[i].fonts.clone() };
+                let ctm0 = mul(&form_matrix(s), &d.ctm);
+                let parsed = interpret_with(doc, &ops, &fonts, ctm0);
+                let mut chain = out[i].chain.clone();
+                chain.push(d.op);
+                kids.push(Scope { chain, form: Some(*id), ops, fonts, parsed, resources, own_resources: own, ctm0 });
+            }
+            out.extend(kids);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// "t12" (page) or "f12.4:t7" (op 7 inside the form drawn at op 4 inside the form drawn at page op 12).
+fn parse_id(id: &str) -> Option<(Vec<usize>, char, usize)> {
+    if let Some(rest) = id.strip_prefix('f') {
+        let (chain, obj) = rest.split_once(':')?;
+        let chain: Option<Vec<usize>> = chain.split('.').map(|c| c.parse().ok()).collect();
+        let k = obj.chars().next()?;
+        return Some((chain?, k, obj[1..].parse().ok()?));
+    }
+    let k = id.chars().next()?;
+    Some((vec![], k, id[1..].parse().ok()?))
+}
+
+fn make_id(chain: &[usize], k: char, op: usize) -> String {
+    if chain.is_empty() {
+        format!("{k}{op}")
+    } else {
+        format!("f{}:{k}{op}", chain.iter().map(|c| c.to_string()).collect::<Vec<_>>().join("."))
+    }
+}
+
+/// Pending changes to one scope.
+#[derive(Default)]
+struct Edits {
+    repl: HashMap<usize, Vec<Operation>>,
+    /// Replace the whole content (text edit) instead of per-op replacements.
+    whole: Option<Vec<Operation>>,
+    fonts: Vec<(Vec<u8>, Object)>,
+    xobjects: Vec<(Vec<u8>, ObjectId)>,
+}
+
+impl Edits {
+    fn content(self_repl: HashMap<usize, Vec<Operation>>, whole: Option<Vec<Operation>>, ops: &[Operation]) -> Vec<Operation> {
+        match whole {
+            Some(w) => w,
+            None => rebuild(ops, self_repl),
+        }
+    }
+}
+
+/// Edit a text run inside a grouped drawing on the page (see textedit).
+pub(crate) fn edit_text_in_groups(doc: &mut PdfDoc, page_no: u32, req: &crate::textedit::EditRequest, new_text: &str) -> Result<Option<crate::textedit::EditOutcome>, EngineError> {
     let pc = load(doc, page_no)?;
-    let mut out = vec![];
-    for s in &pc.parsed.shows {
+    let all = scopes(doc, &pc);
+    for sc in all.iter().filter(|s| !s.chain.is_empty()) {
+        if let Some(ce) = crate::textedit::edit_ops(doc, sc.ops.clone(), &sc.fonts, sc.ctm0, req, new_text)? {
+            let mut edits = BTreeMap::new();
+            edits.insert(sc.chain.clone(), Edits { whole: Some(ce.ops), fonts: ce.fonts, ..Default::default() });
+            write_edits(doc, &pc, &all, edits)?;
+            return Ok(Some(ce.outcome));
+        }
+    }
+    Ok(None)
+}
+
+/// Apply `act` to every selected object, in whatever scope it lives, then
+/// write the results back: changed groups are COPIED (copy-on-write, deepest
+/// first) under new names used only by their parent, so other pages or
+/// placements of the same group keep the original. Returns how many objects
+/// `act` changed.
+fn edit_objects(
+    doc: &mut PdfDoc,
+    page_no: u32,
+    ids: &[String],
+    act: &mut dyn FnMut(&mut PdfDoc, &Scope, char, usize, &mut Edits) -> Result<bool, EngineError>,
+) -> Result<usize, EngineError> {
+    let pc = load(doc, page_no)?;
+    let all = scopes(doc, &pc);
+    let mut edits: BTreeMap<Vec<usize>, Edits> = BTreeMap::new();
+    let mut n = 0;
+    for id in ids {
+        let Some((chain, k, op)) = parse_id(id) else { continue };
+        let Some(sc) = all.iter().find(|s| s.chain == chain) else { continue };
+        let e = edits.entry(chain.clone()).or_default();
+        if act(doc, sc, k, op, e)? {
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return Ok(0);
+    }
+    write_edits(doc, &pc, &all, edits)?;
+    Ok(n)
+}
+
+/// Write scope edits back, deepest first: each changed form becomes a new
+/// object and its parent's Do is renamed to it; finally the page.
+fn write_edits(doc: &mut PdfDoc, pc: &PageContent, all: &[Scope], mut edits: BTreeMap<Vec<usize>, Edits>) -> Result<(), EngineError> {
+    let mut chains: Vec<Vec<usize>> = edits.keys().cloned().collect();
+    while let Some(chain) = {
+        chains.sort_by_key(|c| std::cmp::Reverse(c.len()));
+        chains.first().filter(|c| !c.is_empty()).cloned()
+    } {
+        chains.remove(0);
+        let e = edits.remove(&chain).unwrap_or_default();
+        let sc = all.iter().find(|s| s.chain == chain).expect("scope");
+        let Ok(Object::Stream(orig)) = doc.get_object(sc.form.expect("form")).cloned() else { continue };
+        let mut dict = orig.dict.clone();
+        dict.remove(b"Filter");
+        dict.remove(b"DecodeParms");
+        if !e.fonts.is_empty() || !e.xobjects.is_empty() {
+            let mut res = sc.resources.clone();
+            let mut f = sub_dict(doc, &res, b"Font");
+            for (k, v) in e.fonts {
+                f.set(k, v);
+            }
+            res.set("Font", Object::Dictionary(f));
+            let mut xo = sub_dict(doc, &res, b"XObject");
+            for (k, v) in e.xobjects {
+                xo.set(k, Object::Reference(v));
+            }
+            res.set("XObject", Object::Dictionary(xo));
+            dict.set("Resources", Object::Dictionary(res));
+        } else if !sc.own_resources {
+            dict.set("Resources", Object::Dictionary(sc.resources.clone()));
+        }
+        let mut ns = Stream::new(dict, Content { operations: Edits::content(e.repl, e.whole, &sc.ops) }.encode()?);
+        let _ = ns.compress();
+        let nid = doc.add_object(ns);
+        // Rename the Do in the parent.
+        let parent_chain = chain[..chain.len() - 1].to_vec();
+        let parent = all.iter().find(|s| s.chain == parent_chain).expect("parent scope");
+        let draw = *chain.last().unwrap();
+        let taken = sub_dict(doc, &parent.resources, b"XObject");
+        let pe = edits.entry(parent_chain.clone()).or_default();
+        let name = (1..).map(|k| format!("StFx{k}").into_bytes()).find(|k| taken.get(k).is_err() && !pe.xobjects.iter().any(|(a, _)| a == k)).unwrap();
+        let old = parent.ops[draw].clone();
+        let renamed = Operation::new("Do", vec![Object::Name(name.clone())]);
+        match pe.repl.get_mut(&draw) {
+            Some(v) => {
+                for o in v.iter_mut() {
+                    if o.operator == "Do" && o.operands == old.operands {
+                        *o = renamed.clone();
+                    }
+                }
+            }
+            None => {
+                pe.repl.insert(draw, vec![renamed]);
+            }
+        }
+        pe.xobjects.push((name, nid));
+        if !chains.contains(&parent_chain) {
+            chains.push(parent_chain);
+        }
+    }
+    // The page.
+    let e = edits.remove(&Vec::new()).unwrap_or_default();
+    if !e.repl.is_empty() || e.whole.is_some() {
+        let ops = Edits::content(e.repl, e.whole, &pc.ops);
+        store(doc, pc, ops)?;
+    }
+    if !e.fonts.is_empty() {
+        let mut res = page_resources(doc, pc.page);
+        let mut f = sub_dict(doc, &res, b"Font");
+        for (k, v) in e.fonts {
+            f.set(k, v);
+        }
+        res.set("Font", Object::Dictionary(f));
+        let mut page = doc.get_object(pc.page)?.as_dict()?.clone();
+        page.set("Resources", Object::Dictionary(res));
+        doc.objects.insert(pc.page, Object::Dictionary(page));
+    }
+    add_xobjects(doc, pc.page, e.xobjects)?;
+    Ok(())
+}
+
+fn object_entry(doc: &PdfDoc, sc: &Scope, out: &mut Vec<PageObject>, page_area: f64) {
+    for s in &sc.parsed.shows {
         if let Some(b) = show_box(s) {
             if s.text.trim().is_empty() && s.decoded {
                 continue;
             }
-            let font = pc.fonts.get(&s.font).map(|f| {
+            let font = sc.fonts.get(&s.font).map(|f| {
                 let n = f.base_font.as_str();
                 // Drop a subset prefix such as "ABCDEF+".
                 match n.split_once('+') {
@@ -344,13 +515,11 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
             let scale = (s.trm[2] * s.trm[2] + s.trm[3] * s.trm[3]).sqrt();
             let size = ((s.size * scale * 10.0).round() / 10.0).abs();
             let color = if s.fill.is_empty() { Some("#000000".into()) } else { fill_hex(&s.fill) };
-            out.push(PageObject { id: format!("t{}", s.op), kind: "text".into(), text: s.text.clone(), rect: b, font, size: Some(size), color });
+            out.push(PageObject { id: make_id(&sc.chain, 't', s.op), kind: "text".into(), text: s.text.clone(), rect: b, font, size: Some(size), color });
         }
     }
     // Vector paths (lines, rectangles, filled shapes) — not a full-page background.
-    let pb = crate::docops::page_box(doc, pc.page);
-    let page_area = (pb[2] - pb[0]) * (pb[3] - pb[1]);
-    for p in &pc.parsed.paths {
+    for p in &sc.parsed.paths {
         let b = p.bbox;
         if (b[2] - b[0]) * (b[3] - b[1]) > page_area * 0.9 {
             continue;
@@ -358,24 +527,16 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
         // Thin lines get at least a 3 pt target to click.
         let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
         let (hw, hh) = (((b[2] - b[0]) / 2.0).max(1.5), ((b[3] - b[1]) / 2.0).max(1.5));
-        out.push(PageObject { id: format!("p{}", p.op), kind: "path".into(), text: String::new(), rect: [cx - hw, cy - hh, cx + hw, cy + hh], font: None, size: None, color: None });
+        out.push(PageObject { id: make_id(&sc.chain, 'p', p.op), kind: "path".into(), text: String::new(), rect: [cx - hw, cy - hh, cx + hw, cy + hh], font: None, size: None, color: None });
     }
-    // Shapes inside grouped drawings (form XObjects), one level deep.
-    for f in forms(doc, &pc) {
-        for p in &f.paths {
-            let b = p.bbox;
-            if (b[2] - b[0]) * (b[3] - b[1]) > page_area * 0.9 {
-                continue;
-            }
-            let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
-            let (hw, hh) = (((b[2] - b[0]) / 2.0).max(1.5), ((b[3] - b[1]) / 2.0).max(1.5));
-            out.push(PageObject { id: format!("f{}_{}", f.draw, p.op), kind: "path".into(), text: String::new(), rect: [cx - hw, cy - hh, cx + hw, cy + hh], font: None, size: None, color: None });
-        }
-    }
-    for d in &pc.parsed.draws {
-        let image = pc.xobjects.get(&d.name).copied().unwrap_or(false);
+    let xo = sub_dict(doc, &sc.resources, b"XObject");
+    for d in &sc.parsed.draws {
+        let image = match xo.get(&d.name) {
+            Ok(Object::Reference(id)) => doc.get_object(*id).ok().and_then(|o| o.as_stream().ok()).and_then(|s| s.dict.get(b"Subtype").ok()).and_then(|n| n.as_name().ok()) == Some(b"Image".as_slice()),
+            _ => false,
+        };
         out.push(PageObject {
-            id: format!("i{}", d.op),
+            id: make_id(&sc.chain, 'i', d.op),
             kind: if image { "image" } else { "graphic" }.into(),
             text: String::from_utf8_lossy(&d.name).into_owned(),
             rect: bbox(&d.ctm, 0.0, 0.0, 1.0, 1.0),
@@ -384,9 +545,20 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
             color: None,
         });
     }
+}
+
+pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> {
+    let pc = load(doc, page_no)?;
+    let pb = crate::docops::page_box(doc, pc.page);
+    let page_area = (pb[2] - pb[0]) * (pb[3] - pb[1]);
+    let mut out = vec![];
+    for sc in scopes(doc, &pc) {
+        object_entry(doc, &sc, &mut out, page_area);
+    }
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn parse_ids(ids: &[String]) -> Vec<(char, usize)> {
     ids.iter().filter_map(|id| Some((id.chars().next()?, id[1..].parse().ok()?))).collect()
 }
@@ -453,12 +625,12 @@ fn filtered_array(s: &Show, keep: impl Fn(&Item) -> bool) -> (Vec<Object>, usize
 
 /// After rewriting a show op, put the text matrix back where the following op
 /// expects it.
-fn restore_tm(pc: &PageContent, s: &Show) -> Operation {
-    let positioned = pc.ops[s.op + 1..]
+fn restore_tm(ops: &[Operation], s: &Show) -> Operation {
+    let positioned = ops[s.op + 1..]
         .iter()
         .take_while(|o| !matches!(o.operator.as_str(), "Tj" | "TJ" | "'" | "\"" | "ET"))
         .any(|o| matches!(o.operator.as_str(), "Td" | "TD" | "Tm" | "T*"));
-    let next_is_show = pc.ops[s.op + 1..]
+    let next_is_show = ops[s.op + 1..]
         .iter()
         .find(|o| matches!(o.operator.as_str(), "Tj" | "TJ" | "'" | "\"" | "ET"))
         .map(|o| o.operator != "ET")
@@ -468,88 +640,81 @@ fn restore_tm(pc: &PageContent, s: &Show) -> Operation {
 }
 
 pub fn delete(doc: &mut PdfDoc, page_no: u32, ids: &[String]) -> Result<usize, EngineError> {
-    let pc = load(doc, page_no)?;
-    let mut repl = HashMap::new();
-    for (k, i) in parse_ids(ids) {
-        match k {
-            't' => {
-                if let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i) {
+    let n = edit_objects(doc, page_no, ids, &mut |_, sc, k, i, e| {
+        Ok(match k {
+            't' => match sc.parsed.shows.iter().find(|s| s.op == i) {
+                Some(s) => {
                     let (arr, _) = filtered_array(s, |_| false);
-                    repl.insert(i, as_tj(&pc.ops[i], arr));
+                    e.repl.insert(i, as_tj(&sc.ops[i], arr));
+                    true
                 }
-            }
-            'i' => {
-                repl.insert(i, vec![]);
-            }
-            'p' => {
-                if let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) {
-                    path_delete(p, &pc.ops, &mut repl);
+                None => false,
+            },
+            'i' => sc.parsed.draws.iter().any(|d| d.op == i) && e.repl.insert(i, vec![]).is_none(),
+            'p' => match sc.parsed.paths.iter().find(|p| p.op == i) {
+                Some(p) => {
+                    path_delete(p, &sc.ops, &mut e.repl);
+                    true
                 }
-            }
-            _ => {}
-        }
-    }
-    let (nf, added) = edit_form_paths(doc, &pc, ids, &mut repl, &path_delete)?;
-    let n = repl.len() + nf;
+                None => false,
+            },
+            _ => false,
+        })
+    })?;
     if n == 0 {
         return Err(crate::err!(ErrorCode::ValidationFailed, "nothing selected"));
     }
-    let ops = rebuild(&pc.ops, repl);
-    store(doc, &pc, ops)?;
-    add_xobjects(doc, pc.page, added)?;
     Ok(n)
 }
 
 pub fn translate(doc: &mut PdfDoc, page_no: u32, ids: &[String], dx: f64, dy: f64) -> Result<usize, EngineError> {
-    let pc = load(doc, page_no)?;
-    let mut repl = HashMap::new();
-    for (k, i) in parse_ids(ids) {
-        match k {
+    let n = edit_objects(doc, page_no, ids, &mut |_, sc, k, i, e| {
+        Ok(match k {
             't' => {
-                let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i) else { continue };
+                let Some(s) = sc.parsed.shows.iter().find(|s| s.op == i) else { return Ok(false) };
                 // Shift in user space → shift of the text matrix origin.
-                let Some(ci) = inv(&s.ctm) else { continue };
+                let Some(ci) = inv(&s.ctm) else { return Ok(false) };
                 let (ux, uy) = (dx * ci[0] + dy * ci[2], dx * ci[1] + dy * ci[3]);
                 let mut tm = s.tm;
                 tm[4] += ux;
                 tm[5] += uy;
                 let mut v = vec![];
-                if pc.ops[i].operator == "\"" {
-                    v.push(Operation::new("Tw", vec![pc.ops[i].operands[0].clone()]));
-                    v.push(Operation::new("Tc", vec![pc.ops[i].operands[1].clone()]));
+                if sc.ops[i].operator == "\"" {
+                    v.push(Operation::new("Tw", vec![sc.ops[i].operands[0].clone()]));
+                    v.push(Operation::new("Tc", vec![sc.ops[i].operands[1].clone()]));
                 }
                 v.push(Operation::new("Tm", tm.iter().map(|x| r(*x)).collect()));
-                v.push(Operation::new("TJ", vec![Object::Array(original_array(&pc.ops[i]))]));
-                v.push(restore_tm(&pc, s));
-                repl.insert(i, v);
+                v.push(Operation::new("TJ", vec![Object::Array(original_array(&sc.ops[i]))]));
+                v.push(restore_tm(&sc.ops, s));
+                e.repl.insert(i, v);
+                true
             }
             'i' => {
-                let Some(d) = pc.parsed.draws.iter().find(|d| d.op == i) else { continue };
-                let Some(ci) = inv(&d.ctm) else { continue };
+                let Some(d) = sc.parsed.draws.iter().find(|d| d.op == i) else { return Ok(false) };
+                let Some(ci) = inv(&d.ctm) else { return Ok(false) };
                 // CTM' = M × CTM = CTM × T  ⇒  M = CTM × T × CTM⁻¹
                 let m = mul(&mul(&d.ctm, &[1.0, 0.0, 0.0, 1.0, dx, dy]), &ci);
-                repl.insert(i, vec![
+                e.repl.insert(i, vec![
                     Operation::new("q", vec![]),
                     Operation::new("cm", m.iter().map(|x| r(*x)).collect()),
-                    pc.ops[i].clone(),
+                    sc.ops[i].clone(),
                     Operation::new("Q", vec![]),
                 ]);
+                true
             }
-            'p' => {
-                let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) else { continue };
-                path_move(p, &pc.ops, &mut repl, dx, dy);
-            }
-            _ => {}
-        }
-    }
-    let (nf, added) = edit_form_paths(doc, &pc, ids, &mut repl, &|p, o, r| path_move(p, o, r, dx, dy))?;
-    let n = repl.len() + nf;
+            'p' => match sc.parsed.paths.iter().find(|p| p.op == i) {
+                Some(p) => {
+                    path_move(p, &sc.ops, &mut e.repl, dx, dy);
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        })
+    })?;
     if n == 0 {
         return Err(crate::err!(ErrorCode::ValidationFailed, "nothing selected"));
     }
-    let ops = rebuild(&pc.ops, repl);
-    store(doc, &pc, ops)?;
-    add_xobjects(doc, pc.page, added)?;
     Ok(n)
 }
 
@@ -563,151 +728,120 @@ fn fill_restore(s: &Show) -> Vec<Operation> {
 }
 
 pub fn recolor(doc: &mut PdfDoc, page_no: u32, ids: &[String], rgb: [f64; 3]) -> Result<usize, EngineError> {
-    let pc = load(doc, page_no)?;
-    let mut repl = HashMap::new();
-    for (k, i) in parse_ids(ids) {
-        if k == 'p' {
+    let n = edit_objects(doc, page_no, ids, &mut |_, sc, k, i, e| {
+        Ok(match k {
             // Shapes: outline and fill in the new colour.
-            let Some(p) = pc.parsed.paths.iter().find(|p| p.op == i) else { continue };
-            path_recolor(p, &pc.ops, &mut repl, rgb);
-            continue;
-        }
-        if k != 't' {
-            continue;
-        }
-        let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i) else { continue };
-        let mut v = vec![Operation::new("rg", vec![r(rgb[0]), r(rgb[1]), r(rgb[2])]), pc.ops[i].clone()];
-        v.extend(fill_restore(s));
-        repl.insert(i, v);
-    }
-    let (nf, added) = edit_form_paths(doc, &pc, ids, &mut repl, &|p, o, r| path_recolor(p, o, r, rgb))?;
-    let n = repl.len() + nf;
+            'p' => match sc.parsed.paths.iter().find(|p| p.op == i) {
+                Some(p) => {
+                    path_recolor(p, &sc.ops, &mut e.repl, rgb);
+                    true
+                }
+                None => false,
+            },
+            't' => match sc.parsed.shows.iter().find(|s| s.op == i) {
+                Some(s) => {
+                    let mut v = vec![Operation::new("rg", vec![r(rgb[0]), r(rgb[1]), r(rgb[2])]), sc.ops[i].clone()];
+                    v.extend(fill_restore(s));
+                    e.repl.insert(i, v);
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        })
+    })?;
     if n == 0 {
         return Err(crate::err!(ErrorCode::ValidationFailed, "select text or shapes to recolour (images keep their colours)"));
     }
-    let ops = rebuild(&pc.ops, repl);
-    store(doc, &pc, ops)?;
-    add_xobjects(doc, pc.page, added)?;
     Ok(n)
 }
 
-/// Redraw text runs in a standard font family at `size` — the size as seen
-/// on the page, in points (None = keep). `family` "" keeps each run's own
-/// font and only changes its size.
+/// Redraw text runs in a standard or installed font at `size` — the size as
+/// seen on the page, in points (None = keep). `family` "" keeps each run's
+/// own font and only changes its size.
 pub fn set_font(doc: &mut PdfDoc, page_no: u32, ids: &[String], family: &str, size: Option<f64>) -> Result<usize, EngineError> {
-    let pc = load(doc, page_no)?;
+    if family.is_empty() && size.is_none() {
+        return Err(crate::err!(ErrorCode::ValidationFailed, "choose a font or a size"));
+    }
     // Page size → Tf operand (text may be scaled by its matrix, e.g. Tf 1 + Tm 12).
-    let tf_size = |s: &crate::textedit::Show| match size {
+    let tf_size = |s: &Show| match size {
         Some(v) => {
             let scale = (s.trm[2] * s.trm[2] + s.trm[3] * s.trm[3]).sqrt();
             if scale > 1e-6 { v / scale } else { v }
         }
         None => s.size,
     };
-    if family.is_empty() {
-        let Some(_) = size else {
-            return Err(crate::err!(ErrorCode::ValidationFailed, "choose a font or a size"));
-        };
-        let mut repl = HashMap::new();
-        for (k, i) in parse_ids(ids) {
-            if k != 't' {
-                continue;
-            }
-            let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i) else { continue };
-            let mut v = vec![];
-            if pc.ops[i].operator == "'" || pc.ops[i].operator == "\"" {
-                v.push(Operation::new("T*", vec![]));
-            }
-            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(tf_size(s))]));
-            let mut show = pc.ops[i].clone();
-            if show.operator == "'" || show.operator == "\"" {
-                let last = show.operands.last().cloned().unwrap_or(Object::Null);
-                show = Operation::new("Tj", vec![last]);
-            }
-            v.push(show);
-            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
-            v.push(restore_tm(&pc, s));
-            repl.insert(i, v);
-        }
-        let n = repl.len();
-        if n == 0 {
-            return Err(crate::err!(ErrorCode::ValidationFailed, "select text to change its size"));
-        }
-        let ops = rebuild(&pc.ops, repl);
-        store(doc, &pc, ops)?;
-        return Ok(n);
-    }
     let std14 = matches!(
         family,
         "Helvetica" | "Helvetica-Bold" | "Helvetica-Oblique" | "Helvetica-BoldOblique" | "Times-Roman" | "Times-Bold"
             | "Times-Italic" | "Times-BoldItalic" | "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique"
     );
     // Otherwise: an installed font, by PostScript name (embedded as a subset).
-    let system = if std14 {
+    let system = if std14 || family.is_empty() {
         None
     } else {
         Some(crate::fonts::find_face(family).ok_or_else(|| crate::err!(ErrorCode::ValidationFailed, "font {family} is not installed"))?)
     };
-    let base = family;
-    let mut repl = HashMap::new();
-    let mut new_fonts: Vec<(Vec<u8>, Object)> = vec![];
-    let mut taken: std::collections::HashSet<Vec<u8>> = pc.fonts.keys().cloned().collect();
-    for (k, i) in parse_ids(ids) {
+    let mut taken: HashMap<Vec<usize>, std::collections::HashSet<Vec<u8>>> = HashMap::new();
+    let n = edit_objects(doc, page_no, ids, &mut |doc, sc, k, i, e| {
         if k != 't' {
-            continue;
+            return Ok(false);
         }
-        let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i && s.decoded) else { continue };
-        let name = (1..).map(|n| format!("StFn{n}").into_bytes()).find(|n| !taken.contains(n)).unwrap();
-        taken.insert(name.clone());
-        let shown = match system {
-            Some(face) => {
-                let e = crate::fonts::embed_text(doc, face, &s.text, tf_size(s), s.rise)?;
-                new_fonts.push((name.clone(), Object::Reference(e.font)));
-                e.ops
-            }
-            None => {
-                // Letters the standard font lacks (Cyrillic…) → an installed look-alike.
-                let orig = pc.fonts.get(&s.font).map(|f| f.base_font.clone()).unwrap_or_default();
-                let (font, shown, _, _) = crate::textedit::replacement_font(doc, &orig, base, &s.text, tf_size(s), s.rise);
-                new_fonts.push((name.clone(), font));
-                shown
-            }
-        };
         let mut v = vec![];
-        if pc.ops[i].operator == "'" || pc.ops[i].operator == "\"" {
+        if sc.ops[i].operator == "'" || sc.ops[i].operator == "\"" {
             v.push(Operation::new("T*", vec![]));
         }
-        v.push(Operation::new("Tf", vec![Object::Name(name), r(tf_size(s))]));
-        v.extend(shown);
+        if family.is_empty() {
+            // Size only: same font, same bytes.
+            let Some(s) = sc.parsed.shows.iter().find(|s| s.op == i) else { return Ok(false) };
+            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(tf_size(s))]));
+            let mut show = sc.ops[i].clone();
+            if show.operator == "'" || show.operator == "\"" {
+                let last = show.operands.last().cloned().unwrap_or(Object::Null);
+                show = Operation::new("Tj", vec![last]);
+            }
+            v.push(show);
+            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
+            v.push(restore_tm(&sc.ops, s));
+            e.repl.insert(i, v);
+            return Ok(true);
+        }
+        let Some(s) = sc.parsed.shows.iter().find(|s| s.op == i && s.decoded) else { return Ok(false) };
+        let used = taken.entry(sc.chain.clone()).or_insert_with(|| sub_dict(doc, &sc.resources, b"Font").iter().map(|(k, _)| k.clone()).collect());
+        let mut name = || {
+            let n = (1..).map(|n| format!("StFn{n}").into_bytes()).find(|n| !used.contains(n)).unwrap();
+            used.insert(n.clone());
+            n
+        };
+        match system {
+            Some(face) => {
+                // The chosen installed font; letters it lacks from a fallback.
+                let lower = face.family.to_ascii_lowercase();
+                let serif = lower.contains("times") || lower.contains("serif") || lower.contains("georgia");
+                for (f, piece) in crate::fonts::visual_font_runs(&s.text, face, serif, face.monospace, face.bold, face.italic) {
+                    let em = crate::fonts::embed_text(doc, f, &piece, tf_size(s), s.rise)?;
+                    let n = name();
+                    e.fonts.push((n.clone(), Object::Reference(em.font)));
+                    v.push(Operation::new("Tf", vec![Object::Name(n), r(tf_size(s))]));
+                    v.extend(em.ops);
+                }
+            }
+            None => {
+                // Letters the standard font lacks (Cyrillic…) → installed look-alikes.
+                let orig = sc.fonts.get(&s.font).map(|f| f.base_font.clone()).unwrap_or_default();
+                let rep = crate::textedit::replacement_text(doc, &orig, family, &s.text, tf_size(s), s.rise, &mut name);
+                e.fonts.extend(rep.fonts);
+                v.extend(rep.ops);
+            }
+        }
         v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
-        v.push(restore_tm(&pc, s));
-        repl.insert(i, v);
-    }
-    let n = repl.len();
+        v.push(restore_tm(&sc.ops, s));
+        e.repl.insert(i, v);
+        Ok(true)
+    })?;
     if n == 0 {
         return Err(crate::err!(ErrorCode::ValidationFailed, "select text to change its font"));
     }
-    let ops = rebuild(&pc.ops, repl);
-    store(doc, &pc, ops)?;
-    // Register the new fonts in the page resources.
-    let page = doc.get_object(pc.page)?.as_dict()?.clone();
-    let mut res = match page.get(b"Resources") {
-        Ok(Object::Dictionary(d)) => d.clone(),
-        Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().unwrap_or_default(),
-        _ => lopdf::Dictionary::new(),
-    };
-    let mut f = match res.get(b"Font") {
-        Ok(Object::Dictionary(d)) => d.clone(),
-        Ok(Object::Reference(id)) => doc.get_object(*id).and_then(Object::as_dict).cloned().unwrap_or_default(),
-        _ => lopdf::Dictionary::new(),
-    };
-    for (k, v) in new_fonts {
-        f.set(k, v);
-    }
-    res.set("Font", Object::Dictionary(f));
-    let mut page = doc.get_object(pc.page)?.as_dict()?.clone();
-    page.set("Resources", Object::Dictionary(res));
-    doc.objects.insert(pc.page, Object::Dictionary(page));
     Ok(n)
 }
 

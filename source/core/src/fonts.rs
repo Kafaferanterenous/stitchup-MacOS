@@ -49,19 +49,33 @@ pub fn font_dirs() -> Vec<PathBuf> {
     d
 }
 
+/// Name record text: Unicode records, and Mac Roman records (Apple's .ttc
+/// collections keep many PostScript names only there).
+fn name_text(n: &ttf_parser::name::Name) -> Option<String> {
+    if n.is_unicode() {
+        return n.to_string();
+    }
+    if n.platform_id == ttf_parser::PlatformId::Macintosh && n.encoding_id == 0 {
+        // Mac Roman: ASCII is identical; the rest is rare in font names.
+        let s: String = n.name.iter().map(|b| if *b < 0x80 { *b as char } else { char::REPLACEMENT_CHARACTER }).collect();
+        return (!s.is_empty()).then_some(s);
+    }
+    None
+}
+
 fn name_of(face: &ttf_parser::Face, ids: &[u16]) -> Option<String> {
     for id in ids {
         let mut best: Option<String> = None;
         for n in face.names() {
-            if n.name_id == *id && n.is_unicode() {
-                if let Some(s) = n.to_string() {
-                    // Prefer English (Windows en-US 0x0409, or Mac/Unicode language 0).
-                    if n.language_id == 0x0409 || n.language_id == 0 {
-                        return Some(s);
-                    }
-                    best.get_or_insert(s);
-                }
+            if n.name_id != *id {
+                continue;
             }
+            let Some(s) = name_text(&n) else { continue };
+            // Prefer English (Windows en-US 0x0409, or Mac English 0).
+            if n.language_id == 0x0409 || (n.language_id == 0 && n.platform_id == ttf_parser::PlatformId::Macintosh) {
+                return Some(s);
+            }
+            best.get_or_insert(s);
         }
         if best.is_some() {
             return best;
@@ -89,6 +103,7 @@ fn scan_file(path: &Path, out: &mut Vec<SystemFace>) {
             continue;
         }
         let style = name_of(&face, &[17, 2]).unwrap_or_else(|| "Regular".into());
+        let slanted = { let l = style.to_ascii_lowercase(); l.contains("italic") || l.contains("oblique") };
         out.push(SystemFace {
             family,
             style,
@@ -96,7 +111,7 @@ fn scan_file(path: &Path, out: &mut Vec<SystemFace>) {
             path: path.to_path_buf(),
             index,
             bold: face.is_bold() || face.weight().to_number() >= 600,
-            italic: face.is_italic() || face.is_oblique(),
+            italic: face.is_italic() || face.is_oblique() || slanted,
             weight: face.weight().to_number(),
             monospace: face.is_monospaced(),
             cyrillic: face.glyph_index('Ж').is_some(),
@@ -191,6 +206,84 @@ pub fn fallback_face(text: &str, serif: bool, mono: bool, bold: bool, italic: bo
         }
     }
     system_faces().iter().filter(|f| !f.bold && !f.italic).find(|f| covers(f))
+}
+
+/// Main installed face for a look (serif / sans / mono, bold, italic), even
+/// if it lacks some letters — fallback fonts fill those in per character.
+pub fn primary_face(serif: bool, mono: bool, bold: bool, italic: bool) -> Option<&'static SystemFace> {
+    let families: &[&str] = if mono {
+        &["Menlo", "Courier New", "PT Mono", "Andale Mono"]
+    } else if serif {
+        &["Times New Roman", "Georgia", "PT Serif", "Times"]
+    } else {
+        &["Helvetica Neue", "Arial", "Helvetica", "PT Sans", "Lucida Grande"]
+    };
+    families.iter().find_map(|f| face_in_family(f, bold, italic))
+}
+
+/// Split `text` into runs, each set in one face: `primary` wherever it has
+/// the letter, a fallback face (same look where possible) for the rest.
+/// Spaces and punctuation stay with the surrounding run.
+pub fn font_runs(text: &str, primary: &'static SystemFace, serif: bool, mono: bool, bold: bool, italic: bool) -> Vec<(&'static SystemFace, String)> {
+    let data = std::fs::read(&primary.path).unwrap_or_default();
+    let pf = ttf_parser::Face::parse(&data, primary.index).ok();
+    let has = |c: char| pf.as_ref().map(|f| f.glyph_index(c).is_some()).unwrap_or(false);
+    // Mark each char: true = needs fallback. Neutral chars (spaces) follow the previous one.
+    let chars: Vec<char> = text.chars().collect();
+    let mut need: Vec<bool> = chars.iter().map(|c| !c.is_whitespace() && !has(*c)).collect();
+    for i in 1..chars.len() {
+        if chars[i].is_whitespace() && i + 1 < chars.len() && need[i - 1] && need[i + 1] {
+            need[i] = true;
+        }
+    }
+    let mut runs: Vec<(&'static SystemFace, String)> = vec![];
+    let mut i = 0;
+    while i < chars.len() {
+        let j = (i..chars.len()).find(|k| need[*k] != need[i]).unwrap_or(chars.len());
+        let piece: String = chars[i..j].iter().collect();
+        if need[i] {
+            match fallback_face(&piece, serif, mono, bold, italic) {
+                Some(f) => runs.push((f, piece)),
+                None => {
+                    // No single face: per character.
+                    for c in piece.chars() {
+                        let f = fallback_face(&c.to_string(), serif, mono, bold, italic).unwrap_or(primary);
+                        match runs.last_mut() {
+                            Some((lf, s)) if std::ptr::eq(*lf, f) => s.push(c),
+                            _ => runs.push((f, c.to_string())),
+                        }
+                    }
+                }
+            }
+        } else {
+            match runs.last_mut() {
+                Some((lf, s)) if std::ptr::eq(*lf, primary) => s.push_str(&piece),
+                _ => runs.push((primary, piece)),
+            }
+        }
+        i = j;
+    }
+    runs
+}
+
+/// Font runs in DRAWING order: the whole line is put in bidi visual order
+/// first (so Arabic / Hebrew phrases keep their order across font changes),
+/// then each visual run is split by font; inside a right-to-left run the
+/// pieces are drawn last-to-first.
+pub fn visual_font_runs(text: &str, primary: &'static SystemFace, serif: bool, mono: bool, bold: bool, italic: bool) -> Vec<(&'static SystemFace, String)> {
+    let bidi = unicode_bidi::BidiInfo::new(text, None);
+    let mut out = vec![];
+    for para in &bidi.paragraphs {
+        let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+        for run in runs {
+            let mut segs = font_runs(&text[run.clone()], primary, serif, mono, bold, italic);
+            if levels[run.start].is_rtl() {
+                segs.reverse();
+            }
+            out.extend(segs);
+        }
+    }
+    out
 }
 
 /// Text set in an embedded subset font, ready to follow a `Tf`.

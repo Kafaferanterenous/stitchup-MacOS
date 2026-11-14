@@ -31,3 +31,18 @@ fn dump_shaped_sample() {
     }
     doc.save(out).unwrap();
 }
+
+#[test]
+fn dump_signature_sample() {
+    let Ok(out) = std::env::var("STITCHUP_SIGN_DUMP") else { return };
+    let doc = stitchup_core::docops::new_blank(612.0, 792.0).unwrap();
+    let spec = stitchup_core::sign::SignSpec {
+        name: "Пётр Иванов · 王小明".into(),
+        reason: "Одобрено — Approved".into(),
+        location: "Αθήνα".into(),
+        contact: String::new(),
+        page: Some(1),
+        rect: Some([72.0, 600.0, 372.0, 700.0]),
+    };
+    std::fs::write(out, stitchup_core::sign::sign_document(&doc, &spec).unwrap()).unwrap();
+}

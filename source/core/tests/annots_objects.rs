@@ -432,3 +432,118 @@ fn devanagari_conjuncts_and_vowel_signs_are_shaped() {
     let text = reload(&mut d).extract_text(&[1]).unwrap();
     assert!(text.contains('क') && text.contains('ष'), "{text}");
 }
+
+#[test]
+fn nested_groups_and_text_inside_groups_are_editable() {
+    use lopdf::{dictionary, Stream};
+    let mut d = doc();
+    let n = |v: f64| Object::Real(v as f32);
+    let font = d.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Times-Roman", "Encoding" => "WinAnsiEncoding" });
+    // Inner group: a filled square. Outer group: a caption (own font) + the inner group, shifted.
+    let inner = d.add_object(Stream::new(
+        dictionary! { "Type" => "XObject", "Subtype" => "Form", "BBox" => vec![n(-999.0), n(-999.0), n(999.0), n(999.0)] },
+        Content { operations: vec![Operation::new("rg", vec![n(0.0), n(0.5), n(0.0)]), Operation::new("re", vec![n(0.0), n(0.0), n(30.0), n(30.0)]), Operation::new("f", vec![])] }.encode().unwrap(),
+    ));
+    let outer = d.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form", "BBox" => vec![n(-999.0), n(-999.0), n(999.0), n(999.0)],
+            "Resources" => dictionary! { "Font" => dictionary! { "FT" => font }, "XObject" => dictionary! { "In" => inner } },
+        },
+        Content { operations: vec![
+            Operation::new("BT", vec![]), Operation::new("Tf", vec!["FT".into(), 10.into()]), Operation::new("Td", vec![0.into(), 50.into()]),
+            Operation::new("Tj", vec![Object::String(b"Caption inside a group".to_vec(), StringFormat::Literal)]), Operation::new("ET", vec![]),
+            Operation::new("q", vec![]), Operation::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(10.0), n(0.0)]), Operation::new("Do", vec!["In".into()]), Operation::new("Q", vec![]),
+        ] }.encode().unwrap(),
+    ));
+    let page = *d.get_pages().get(&1).unwrap();
+    let mut pd = d.get_object(page).unwrap().as_dict().unwrap().clone();
+    let mut res = pd.get(b"Resources").unwrap().as_dict().unwrap().clone();
+    let mut xo = res.get(b"XObject").unwrap().as_dict().unwrap().clone();
+    xo.set("Out", outer);
+    res.set("XObject", xo);
+    pd.set("Resources", res);
+    d.objects.insert(page, Object::Dictionary(pd));
+    let mut c = Content::decode(&d.get_page_content(page)).unwrap();
+    c.operations.extend([Operation::new("q", vec![]), Operation::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(200.0), n(300.0)]), Operation::new("Do", vec!["Out".into()]), Operation::new("Q", vec![])]);
+    d.change_page_content(page, c.encode().unwrap()).unwrap();
+
+    let objs = objects::list(&d, 1).unwrap();
+    let caption = objs.iter().find(|o| o.text == "Caption inside a group").expect("text inside the group is listed").clone();
+    assert!(caption.id.starts_with('f') && caption.font.as_deref() == Some("Times-Roman"), "{caption:?}");
+    assert!((caption.rect[0] - 200.0).abs() < 0.5 && (caption.rect[1] - 347.0).abs() < 2.0, "{:?}", caption.rect);
+    let square = objs.iter().find(|o| o.kind == "path" && o.id.matches('.').count() == 1).expect("shape two levels deep").clone();
+    assert_eq!(square.rect.map(|v| v.round()), [210.0, 300.0, 240.0, 330.0], "{square:?}");
+
+    // Edit both: move the nested square, recolour + re-font the caption.
+    objects::translate(&mut d, 1, &[square.id], 0.0, -100.0).unwrap();
+    let cap = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Caption inside a group").unwrap();
+    objects::recolor(&mut d, 1, &[cap.id], [0.8, 0.0, 0.0]).unwrap();
+    let cap = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Caption inside a group").unwrap();
+    objects::set_font(&mut d, 1, &[cap.id], "Helvetica-Bold", Some(14.0)).unwrap();
+
+    let back = reload(&mut d);
+    let objs = objects::list(&back, 1).unwrap();
+    let sq = objs.iter().find(|o| o.kind == "path" && o.id.matches('.').count() == 1).unwrap();
+    assert_eq!(sq.rect.map(|v| v.round()), [210.0, 200.0, 240.0, 230.0], "nested square moved");
+    let cap = objs.iter().find(|o| o.text == "Caption inside a group").unwrap();
+    assert_eq!((cap.font.as_deref(), cap.size, cap.color.as_deref()), (Some("Helvetica-Bold"), Some(14.0), Some("#cc0000")), "{cap:?}");
+    // Originals untouched (copy-on-write at both levels).
+    for id in [outer, inner] {
+        let s = back.get_object(id).unwrap().as_stream().unwrap();
+        let ops = Content::decode(&s.decompressed_content().unwrap()).unwrap().operations;
+        assert!(!ops.iter().any(|o| o.operator == "Tf" && o.operands.first().and_then(|x| x.as_name().ok()) != Some(b"FT".as_slice())), "original group unchanged");
+    }
+    assert!(back.extract_text(&[1]).unwrap().contains("SECRET 1234"));
+}
+
+#[test]
+fn text_inside_a_group_is_edited_in_place_not_covered() {
+    use lopdf::{dictionary, Stream};
+    use stitchup_core::textedit::{edit_text, EditMethod, EditRequest};
+    let mut d = doc();
+    let n = |v: f64| Object::Real(v as f32);
+    let font = d.add_object(dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Times-Roman", "Encoding" => "WinAnsiEncoding" });
+    let group = d.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject", "Subtype" => "Form", "BBox" => vec![n(-999.0), n(-999.0), n(999.0), n(999.0)],
+            "Matrix" => vec![n(1.0), n(0.0), n(0.0), n(1.0), n(50.0), n(0.0)],
+            "Resources" => dictionary! { "Font" => dictionary! { "FT" => font } },
+        },
+        Content { operations: vec![
+            Operation::new("BT", vec![]), Operation::new("Tf", vec!["FT".into(), 10.into()]), Operation::new("Td", vec![0.into(), 50.into()]),
+            Operation::new("Tj", vec![Object::String(b"Caption inside a group".to_vec(), StringFormat::Literal)]), Operation::new("ET", vec![]),
+        ] }.encode().unwrap(),
+    ));
+    let page = *d.get_pages().get(&1).unwrap();
+    let mut pd = d.get_object(page).unwrap().as_dict().unwrap().clone();
+    let mut res = pd.get(b"Resources").unwrap().as_dict().unwrap().clone();
+    let mut xo = res.get(b"XObject").unwrap().as_dict().unwrap().clone();
+    xo.set("G", group);
+    res.set("XObject", xo);
+    pd.set("Resources", res);
+    d.objects.insert(page, Object::Dictionary(pd));
+    let mut c = Content::decode(&d.get_page_content(page)).unwrap();
+    c.operations.extend([Operation::new("q", vec![]), Operation::new("cm", vec![n(1.0), n(0.0), n(0.0), n(1.0), n(150.0), n(300.0)]), Operation::new("Do", vec!["G".into()]), Operation::new("Q", vec![])]);
+    d.change_page_content(page, c.encode().unwrap()).unwrap();
+
+    let cap = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Caption inside a group").unwrap();
+    let w = cap.rect[2] - cap.rect[0];
+    // Page-space baseline: 150 + 50 = 200, 300 + 50 = 350.
+    let mk = |old: &str, new: &str| EditRequest { page: 1, x: 200.0, y: 350.0, width: w, font_size: 10.0, old_text: old.into(), new_text: new.into() };
+    let out = edit_text(&mut d, &mk("Caption inside a group", "Edited caption")).unwrap();
+    assert_eq!(out.method, EditMethod::InPlace, "{}", out.note);
+    // Letters Times-Roman (WinAnsi) lacks → replaced inside the group, still in place.
+    let out2 = edit_text(&mut d, &mk("Edited caption", "Подпись")).unwrap();
+    assert_eq!(out2.method, EditMethod::Replaced, "{}", out2.note);
+    let back = reload(&mut d);
+    // (lopdf's extract_text skips form XObjects: read the listed objects instead.)
+    let text: String = objects::list(&back, 1).unwrap().into_iter().map(|o| o.text).collect::<Vec<_>>().join(" | ");
+    assert!(text.contains("Подпись") && !text.contains("Caption inside") && !text.contains("Edited caption"), "{text}");
+    let obj = objects::list(&back, 1).unwrap().into_iter().find(|o| o.text.contains("Подпись")).expect("new text listed");
+    assert!(obj.id.starts_with('f') && (obj.rect[0] - 200.0).abs() < 1.0, "drawn inside the group at the same place: {obj:?}");
+    // No white cover-up on the page, original group untouched.
+    let ops = Content::decode(&back.get_page_content(page)).unwrap().operations;
+    assert!(!ops.iter().any(|o| o.operator == "re"), "no overlay patch");
+    let s = back.get_object(group).unwrap().as_stream().unwrap();
+    assert!(String::from_utf8_lossy(&s.decompressed_content().unwrap()).contains("Caption inside a group"), "shared group unchanged");
+}

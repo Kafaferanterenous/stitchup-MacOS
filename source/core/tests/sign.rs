@@ -49,7 +49,10 @@ fn parts(pdf: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn openssl_verifies(data: &[u8], der: &[u8]) -> bool {
-    let dir = std::env::temp_dir().join(format!("stitchup-sign-{}", std::process::id()));
+    // One folder per check: tests run in parallel threads of one process.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let k = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("stitchup-sign-{}-{k}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("data.bin"), data).unwrap();
     std::fs::write(dir.join("sig.der"), der).unwrap();
@@ -60,6 +63,7 @@ fn openssl_verifies(data: &[u8], der: &[u8]) -> bool {
         .args(["-out", "/dev/null"])
         .output()
         .expect("openssl available");
+    let _ = std::fs::remove_dir_all(&dir);
     out.status.success()
 }
 
@@ -134,4 +138,26 @@ fn edited_signed_pdf_saved_incrementally_keeps_the_first_signature_and_can_be_si
     // Unchanged document → same bytes.
     let same = PdfDoc::load_mem(&first).unwrap();
     assert_eq!(stitchup_core::docops::incremental_update(&first, &same).unwrap(), first);
+}
+
+#[test]
+fn visible_signature_shows_non_latin_names_in_an_installed_font() {
+    if stitchup_core::fonts::system_faces().iter().all(|f| !f.cyrillic) {
+        return;
+    }
+    let doc = new_blank(612.0, 792.0).unwrap();
+    let pdf = sign_document(&doc, &SignSpec { name: "Пётр Иванов".into(), location: "Αθήνα".into(), ..spec(true) }).unwrap();
+    let back = PdfDoc::load_mem(&pdf).unwrap();
+    // The appearance form uses an embedded Type0 font, and no "?" placeholders.
+    let ap = back.objects.values().filter_map(|o| o.as_stream().ok()).find(|s| s.dict.get(b"BBox").is_ok() && s.dict.get(b"Subtype").and_then(|n| n.as_name()).ok() == Some(b"Form".as_slice())).expect("appearance");
+    let fonts = ap.dict.get(b"Resources").unwrap().as_dict().unwrap().get(b"Font").unwrap().as_dict().unwrap();
+    let type0 = fonts.iter().filter(|(_, v)| {
+        let d = match v { lopdf::Object::Reference(r) => back.get_object(*r).unwrap().as_dict().unwrap(), o => o.as_dict().unwrap() };
+        d.get(b"Subtype").and_then(|n| n.as_name()).ok() == Some(b"Type0".as_slice())
+    }).count();
+    assert!(type0 >= 2, "name and location lines embedded: {type0}");
+    let content = String::from_utf8_lossy(&ap.decompressed_content().unwrap_or(ap.content.clone())).into_owned();
+    assert!(!content.contains("(?"), "no ? placeholders: {content}");
+    let (data, der) = parts(&pdf);
+    assert!(openssl_verifies(&data, &der));
 }

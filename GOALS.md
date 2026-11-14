@@ -2,7 +2,7 @@
 
 Target: the best all-round PDF editor, at feature and look parity with the
 Windows build (github.com/Kafaferanterenous/stitchup-Win v0.12.28), and ahead of it where macOS allows.
-Updated 2026-11-14 (v0.9.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
+Updated 2026-11-14 (v0.10.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
 
 ## A. Look & navigation (same as Windows)
 | # | Goal | Status |
@@ -49,7 +49,7 @@ Updated 2026-11-14 (v0.9.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 |---|------|--------|
 | E1 | In-place text edit in the original font | ✅ |
 | E2 | Unicode fallback font — Central European Latin via standard fonts; Cyrillic, Greek, CJK and any other script via an installed font of the same style (subset-embedded, ToUnicode kept); Arabic, Hebrew, Indic, Thai shaped (rustybuzz: joining, ligatures, conjuncts, mark positioning) in bidi visual order, with /ActualText for copy | ✅ |
-| E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs, images and vector shapes (lines, rectangles, filled areas — also inside grouped drawings / form XObjects, edited copy-on-write; recolour with Fore); move, delete, marquee, ⌘-click | ✅ |
+| E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs, images and vector shapes (lines, rectangles, filled areas — also inside grouped drawings / form XObjects nested up to 4 deep, edited copy-on-write; text inside groups too, including in-place editing; recolour with Fore); move, delete, marquee, ⌘-click | ✅ |
 | E4 | Recolor, Font & size, Fore/Back colours — colour palettes; while editing a line a bar shows its real font and size; any installed font (searchable picker, names in their own typeface, subset-embedded) or the standard ones; bold/italic also on the original font (same installed family, else nearest standard) | ✅ |
 | E5 | Insert image — PNG (with transparency), JPEG (embedded as-is), GIF/WebP/HEIC/TIFF | ✅ |
 
@@ -61,7 +61,7 @@ Updated 2026-11-14 (v0.9.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | F3 | Watermark | ✅ |
 | F4 | True redaction (content removed, not covered) — text glyphs and whole images under the box removed; partly-covered images are blacked out | ✅ |
 | F5 | Fill AcroForms — text, multi-line, checkbox, radio, drop-down; appearances regenerated (shows in Preview/Acrobat); undoable | ✅ |
-| F6 | Digital signature — self-signed RSA-2048 / SHA-256 PKCS#7, visible box; verified with OpenSSL. Signing or saving (⌘S) an already-signed PDF — edited or not — appends an incremental update, so every earlier signature stays valid (three signatures verified with OpenSSL) | ✅ |
+| F6 | Digital signature — self-signed RSA-2048 / SHA-256 PKCS#7, visible box (any script: installed fonts with per-character fallback, long lines narrowed to fit); verified with OpenSSL. Signing or saving (⌘S) an already-signed PDF — edited or not — appends an incremental update, so every earlier signature stays valid (three signatures verified with OpenSSL) | ✅ |
 
 ## G. Beyond Windows (macOS)
 | # | Goal | Status |

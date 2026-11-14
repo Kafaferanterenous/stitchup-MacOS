@@ -139,26 +139,28 @@ fn appearance(doc: &mut PdfDoc, w: f64, h: f64, lines: &[String]) -> ObjectId {
         Operation::new("BT", vec![]),
         Operation::new("rg", vec![r(0.05), r(0.15), r(0.4)]),
     ];
-    let mut diffs = Vec::new();
-    let mut encoded = Vec::new();
-    for l in lines {
-        let t = crate::textedit::std14_encode(l);
-        for d in &t.diffs {
-            if !diffs.contains(d) {
-                diffs.push(*d);
-            }
-        }
-        encoded.push(t.bytes);
-    }
-    // One font for all lines: re-encode with the union of diffs.
+    // Each line in a standard font when it can show it; otherwise (Cyrillic,
+    // Greek, CJK, Arabic…) an installed font of the same style, embedded.
+    let mut fonts = lopdf::Dictionary::new();
     let mut y = h - size * 1.25;
     for (i, l) in lines.iter().enumerate() {
         let font_size = if i == 0 { size * 1.05 } else { size * 0.9 };
-        let font = if i == 0 { "SB" } else { "SR" };
-        let bytes = encode_with(l, &diffs).unwrap_or_else(|| encoded[i].clone());
-        ops.push(Operation::new("Tf", vec![Object::Name(font.as_bytes().to_vec()), r(font_size)]));
+        let family = if i == 0 { "Helvetica-Bold" } else { "Helvetica" };
+        let mut k = 0;
+        let mut name = || {
+            k += 1;
+            format!("SL{i}_{k}").into_bytes()
+        };
+        let rep = crate::textedit::replacement_text(doc, family, family, l, font_size, 0.0, &mut name);
+        for (n, f) in rep.fonts {
+            fonts.set(n, f);
+        }
+        // A long line is narrowed to fit the box rather than cut off.
+        let avail = w - size;
+        let width = rep.advance * font_size;
+        ops.push(Operation::new("Tz", vec![r(if width > avail && width > 0.0 { avail / width * 100.0 } else { 100.0 })]));
         ops.push(Operation::new("Tm", vec![r(1.0), r(0.0), r(0.0), r(1.0), r(size * 0.5), r(y)]));
-        ops.push(Operation::new("Tj", vec![Object::String(bytes, StringFormat::Literal)]));
+        ops.extend(rep.ops);
         y -= size * 1.15;
     }
     ops.extend([Operation::new("ET", vec![]), Operation::new("Q", vec![])]);
@@ -168,29 +170,12 @@ fn appearance(doc: &mut PdfDoc, w: f64, h: f64, lines: &[String]) -> ObjectId {
             "Type" => "XObject",
             "Subtype" => "Form",
             "BBox" => vec![0.into(), 0.into(), r(w), r(h)],
-            "Resources" => dictionary! { "Font" => dictionary! {
-                "SB" => crate::textedit::std14_font("Helvetica-Bold", &diffs),
-                "SR" => crate::textedit::std14_font("Helvetica", &diffs),
-            } },
+            "Resources" => dictionary! { "Font" => fonts },
         },
         data,
     ))
 }
 
-/// Encode `s` using a fixed /Differences table (all lines share one font).
-fn encode_with(s: &str, diffs: &[(u8, &'static str)]) -> Option<Vec<u8>> {
-    let t = crate::textedit::std14_encode(s);
-    let mut out = Vec::with_capacity(t.bytes.len());
-    for b in t.bytes {
-        if (1..32).contains(&b) {
-            let name = t.diffs.iter().find(|(c, _)| *c == b)?.1;
-            out.push(diffs.iter().find(|(_, n)| *n == name)?.0);
-        } else {
-            out.push(b);
-        }
-    }
-    Some(out)
-}
 
 /// Produce signed file bytes for `doc` (serialized first; `doc` is not modified).
 pub fn sign_document(doc: &PdfDoc, spec: &SignSpec) -> Result<Vec<u8>, EngineError> {

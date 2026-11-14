@@ -43,7 +43,8 @@ not notarized. The first time you open it, right-click it and choose
   in Preview and Acrobat.
 - **Redact:** what is under the box is removed from the file, not just covered.
 - **Content tools:** select, move and delete text, images, shapes (lines,
-  rectangles, filled areas, also inside grouped drawings) and annotations.
+  rectangles, filled areas) and annotations — also inside grouped drawings,
+  where text can be edited in place too.
   Recolour selected text, shapes and existing annotations.
   Recolour text, change its font and size, insert images (PNG with
   transparency, JPEG, HEIC…) and draw vector shapes.
