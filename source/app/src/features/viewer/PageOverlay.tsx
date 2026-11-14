@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import type { PageViewport } from "pdfjs-dist";
-import { store, useAppState, rgb, type Tool } from "../../store";
+import { store, useAppState, rgb, annotColor, type Tool } from "../../store";
 import type { RenderSession } from "../../adapters/renderAdapter";
 import type { TextRun } from "../../types";
 import { cmdListFields, cmdListObjects, cmdOpenUrl, type FormField, type PageObject } from "../../ipc";
@@ -120,6 +120,8 @@ export function PageOverlay({
   }, [tool, session, pageNo]);
 
   if (!vp) return null;
+  // Colour of the shape being dragged: content shapes use Fore, annotations Annotate ▸ Colour.
+  const liveColor = (tool ?? "").startsWith("shape-") ? app.foreColor : annotColor(app, tool === "highlight" ? "highlight" : "other");
 
   // Between an edit and the re-render, the page on screen is the previous
   // version: object ids/outlines are stale, so nothing is pickable.
@@ -147,6 +149,7 @@ export function PageOverlay({
     const pr = pdfRect(box);
     const fore = rgb(app.foreColor);
     const back = app.backColor ? rgb(app.backColor) : null;
+    const ann = rgb(annotColor(app, "other"));
     const w = app.strokeWidth;
     const pt = toPdf(box[0], box[1]);
     const def = (wPt: number, hPt: number): [number, number, number, number] => [pt[0], pt[1] - hPt, pt[0] + wPt, pt[1]];
@@ -157,7 +160,7 @@ export function PageOverlay({
         const boxes = markupBoxes(box).map(pdfRect);
         if (!boxes.length) return store.notify("Drag across some text");
         const kind = t === "strikeout" ? "strike_out" : t;
-        void store.annotate(page, { kind, boxes, color: t === "highlight" ? [1, 0.92, 0.23] : fore });
+        void store.annotate(page, { kind, boxes, color: rgb(annotColor(app, t === "highlight" ? "highlight" : "other")) });
         return;
       }
       case "note":
@@ -187,13 +190,13 @@ export function PageOverlay({
         return;
       case "rect":
       case "oval":
-        void store.annotate(page, { kind: t === "rect" ? "square" : "circle", rect: click ? def(120, 80) : pr, color: fore, fill: back, width: w });
+        void store.annotate(page, { kind: t === "rect" ? "square" : "circle", rect: click ? def(120, 80) : pr, color: ann, fill: back, width: w });
         return;
       case "line":
       case "arrow": {
         const a = toPdf(box[0], box[1]);
         const b = click ? [a[0] + 120, a[1]] : toPdf(box[2], box[3]);
-        void store.annotate(page, { kind: "line", from: a, to: b, color: fore, width: w, arrow: t === "arrow" });
+        void store.annotate(page, { kind: "line", from: a, to: b, color: ann, width: w, arrow: t === "arrow" });
         return;
       }
       case "redact":
@@ -278,7 +281,7 @@ export function PageOverlay({
       const pts = [...ink, p];
       setInk([]);
       if (pts.length < 2) return;
-      void store.annotate(pageNo, { kind: "ink", strokes: [pts.map(([x, y]) => toPdf(x, y))], color: rgb(app.foreColor), width: app.strokeWidth });
+      void store.annotate(pageNo, { kind: "ink", strokes: [pts.map(([x, y]) => toPdf(x, y))], color: rgb(annotColor(app, "other")), width: app.strokeWidth });
       return;
     }
     if (!drag) return;
@@ -430,19 +433,19 @@ export function PageOverlay({
       {/* Live previews */}
       {dragBox && (tool === "line" || tool === "arrow" || tool === "shape-line" || tool === "shape-arrow") ? (
         <svg className="draw-preview">
-          <line x1={drag!.start[0]} y1={drag!.start[1]} x2={drag!.cur[0]} y2={drag!.cur[1]} stroke={app.foreColor} strokeWidth={app.strokeWidth * zoom} />
+          <line x1={drag!.start[0]} y1={drag!.start[1]} x2={drag!.cur[0]} y2={drag!.cur[1]} stroke={liveColor} strokeWidth={app.strokeWidth * zoom} />
         </svg>
       ) : (
         dragBox && (
           <div
             className={`drag-box ${tool === "redact" ? "redact" : tool === "highlight" ? "highlight" : ""}${tool === "oval" || tool === "shape-oval" ? " oval" : ""}`}
-            style={{ left: dragBox[0], top: dragBox[1], width: dragBox[2] - dragBox[0], height: dragBox[3] - dragBox[1], borderColor: tool === "select" ? undefined : app.foreColor }}
+            style={{ left: dragBox[0], top: dragBox[1], width: dragBox[2] - dragBox[0], height: dragBox[3] - dragBox[1], borderColor: tool === "select" ? undefined : liveColor }}
           />
         )
       )}
       {ink.length > 1 && (
         <svg className="draw-preview">
-          <polyline points={ink.map((p) => p.join(",")).join(" ")} fill="none" stroke={app.foreColor} strokeWidth={app.strokeWidth * zoom} strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points={ink.map((p) => p.join(",")).join(" ")} fill="none" stroke={liveColor} strokeWidth={app.strokeWidth * zoom} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
     </div>

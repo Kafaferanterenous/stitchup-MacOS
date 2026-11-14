@@ -193,3 +193,33 @@ fn images_are_inserted_and_become_selectable_objects() {
     assert!(has_smask, "transparency kept");
     assert!(objects::insert_image(&mut d, 1, [0.0, 0.0, 50.0, 50.0], &objects::ImageData::Jpeg { bytes: vec![1, 2, 3] }).is_err());
 }
+
+#[test]
+fn text_objects_report_font_size_colour_and_size_only_change_keeps_the_font() {
+    let mut d = doc();
+    let o = objects::list(&d, 1).unwrap();
+    let line = o.iter().find(|o| o.text == "Public line").unwrap().clone();
+    assert_eq!(line.font.as_deref(), Some("Helvetica"));
+    assert_eq!(line.size, Some(12.0));
+    assert_eq!(line.color.as_deref(), Some("#000000"));
+    objects::recolor(&mut d, 1, &[line.id.clone()], [1.0, 0.0, 0.0]).unwrap();
+    let line = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap();
+    assert_eq!(line.color.as_deref(), Some("#ff0000"));
+    // Size only ("" family): same font, new size.
+    objects::set_font(&mut d, 1, &[line.id.clone()], "", Some(20.0)).unwrap();
+    let line = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap();
+    assert_eq!((line.font.as_deref(), line.size), (Some("Helvetica"), Some(20.0)));
+    // Sizes are page sizes even when the text matrix scales the font (Tf 1, Tm 12).
+    let mut d = doc();
+    let page = *d.get_pages().get(&1).unwrap();
+    let mut c = Content::decode(&d.get_page_content(page)).unwrap();
+    c.operations[1] = Operation::new("Tf", vec!["F1".into(), 1.into()]);
+    c.operations[2] = Operation::new("Tm", vec![12.into(), 0.into(), 0.into(), 12.into(), 72.into(), 700.into()]);
+    c.operations[4] = Operation::new("Td", vec![0.into(), Object::Real(-20.0 / 12.0)]);
+    d.change_page_content(page, c.encode().unwrap()).unwrap();
+    let line = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap();
+    assert_eq!(line.size, Some(12.0));
+    objects::set_font(&mut d, 1, &[line.id], "Times-Roman", Some(18.0)).unwrap();
+    let line = objects::list(&d, 1).unwrap().into_iter().find(|o| o.text == "Public line").unwrap();
+    assert_eq!((line.font.as_deref(), line.size), (Some("Times-Roman"), Some(18.0)));
+}

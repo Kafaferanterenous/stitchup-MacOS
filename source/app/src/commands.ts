@@ -34,7 +34,7 @@ export interface Command {
   /** Drop-down choices shown under the ribbon button (Shape, Stamp…). */
   choices?: () => { label: string; run: () => void; active?: boolean }[];
   /** Colour swatch button (Fore / Back). */
-  swatch?: "fore" | "back";
+  swatch?: "fore" | "back" | "ann";
 }
 
 export const STAMPS = ["Approved", "Not Approved", "Draft", "Final", "Confidential", "Paid", "Sold", "Received", "Rejected", "Void", "Urgent", "For Comment"];
@@ -188,7 +188,6 @@ export const COMMANDS: Command[] = [
   { id: "save", label: "Save", tip: "Save changes to the current file (⌘S)", icon: "save", accel: "CmdOrCtrl+S", tab: "Document", run: save, enabled: hasDoc },
   { id: "saveAs", label: "Save As", menu: "Save As…", tip: "Save to a new file name (⌘⇧S)", icon: "save-as", accel: "CmdOrCtrl+Shift+S", tab: "Document", run: saveAs, enabled: hasDoc },
   { id: "properties", label: "Properties", menu: "Document Properties…", tip: "Edit the document metadata (title, author, subject, keywords)", icon: "info", tab: "Document", run: () => store.setMetadataOpen(true), enabled: hasDoc },
-  { id: "attachments", label: "Attachments", menu: "Attachments…", tip: "View the files embedded in this document", icon: "attachment", tab: "Document", run: () => store.setDialog("attachments"), enabled: hasDoc },
   { id: "import", label: "Import", menu: "Import PDF…", tip: "Insert pages from another PDF into this one", icon: "import", tab: "Document", run: async () => {
       const p = await openDialog({ multiple: false, filters: PDF });
       if (typeof p === "string") await store.importPdf(p);
@@ -239,7 +238,7 @@ export const COMMANDS: Command[] = [
   { id: "annLink", label: "Link", menu: "Link…", tip: "Drag the clickable area, then give a web address or page number", icon: "link", tab: "Annotate", enabled: hasDoc, active: isTool("link"), run: toolCmd("link") },
   { id: "annRedact", label: "Redact", tip: "Drag over content to permanently remove it and black it out", icon: "redact", tab: "Annotate", enabled: hasDoc, active: isTool("redact"), run: toolCmd("redact") },
   { id: "annPen", label: "Pen", tip: "Draw freehand lines on the page (Fore colour)", icon: "pen", tab: "Annotate", enabled: hasDoc, active: isTool("pen"), run: toolCmd("pen") },
-  { id: "annFore", label: "Colour", tip: "Colour for underline, pen, shapes and text boxes", icon: "palette", tab: "Annotate", swatch: "fore", run: () => {} },
+  { id: "annFore", label: "Colour", tip: "Colour for new annotations: highlight, underline, strike-out, pen, shapes and text boxes", icon: "palette", tab: "Annotate", swatch: "ann", run: () => {} },
 
   // ----------------------------------------------------------------- Content
   { id: "select", label: "Select", menu: "Select / Move Content Object", tip: "Click text, images or annotations to select (⌘-click adds, drag a box for many); drag to move; ⌫ deletes", icon: "select", tab: "Content", enabled: hasDoc, active: isTool("select"), run: toolCmd("select") },
@@ -250,12 +249,12 @@ export const COMMANDS: Command[] = [
     } },
   { id: "objDelete", label: "Delete", menu: "Delete Selected Object", tip: "Remove the selected objects (⌫)", icon: "trash", tab: "Content",
     enabled: (s) => hasDoc(s) && !!s.picked && s.picked.objects.length + s.picked.annots.length > 0, run: () => store.deletePicked() },
-  { id: "recolor", label: "Recolor", menu: "Recolor Selected Object…", tip: "Change the colour of the selected text", icon: "palette", tab: "Content",
-    enabled: (s) => hasDoc(s) && !!s.picked?.objects.length, run: () => store.setDialog("recolor") },
-  { id: "font", label: "Font", menu: "Font and Size…", tip: "Change the font family and size of the selected text", icon: "font", tab: "Content",
-    enabled: (s) => hasDoc(s) && !!s.picked?.objects.length, run: () => store.setDialog("font") },
-  { id: "fore", label: "Fore", tip: "Foreground colour: text colour and shape outline", icon: "palette", tab: "Content", swatch: "fore", run: () => {} },
-  { id: "back", label: "Back", tip: "Background colour: fill used by new shapes (right-click for no fill)", icon: "palette", tab: "Content", swatch: "back", run: () => {} },
+  { id: "recolor", label: "Recolor", menu: "Recolor Selected Object…", tip: "Change the colour of the selected text or the line being edited", icon: "palette", tab: "Content",
+    enabled: (s) => hasDoc(s) && (!!s.picked?.objects.length || !!s.editingLine), run: () => store.setDialog("recolor") },
+  { id: "font", label: "Font", menu: "Font and Size…", tip: "Change the font family and size of the selected text or the line being edited", icon: "font", tab: "Content",
+    enabled: (s) => hasDoc(s) && (!!s.picked?.objects.length || !!s.editingLine), run: () => store.setDialog("font") },
+  { id: "fore", label: "Fore", tip: "Text colour: recolours the selected text or the line being edited; also the outline of new shapes", icon: "palette", tab: "Content", swatch: "fore", run: () => {} },
+  { id: "back", label: "Back", tip: "Fill colour for new shapes (or none)", icon: "palette", tab: "Content", swatch: "back", run: () => {} },
   { id: "image", label: "Image", menu: "Insert Image…", tip: "Insert a picture (PNG, JPEG, GIF, WebP, HEIC…): choose it, then click or drag on the page", icon: "image", tab: "Content", enabled: hasDoc, active: isTool("image"), run: insertImage },
   { id: "ocr", label: "OCR", menu: "Recognize Text (OCR)", tip: "Make scanned pages searchable: recognise their text on this Mac (Apple Vision) and add it as an invisible layer", icon: "find", tab: "Content", enabled: hasDoc,
     choices: () => [
@@ -358,7 +357,7 @@ export function matchesKey(e: KeyboardEvent, spec: string): boolean {
 
 /** Menu bar layout (same menus as the Windows build). */
 export const MENUS: { title: string; items: (string | "-" | { submenu: string })[] }[] = [
-  { title: "File", items: ["new", "open", "newTab", "closeTab", "prevTab", "nextTab", "-", "save", "saveAs", "encrypt", "import", "mergePdfs", "combineNew", "compress", "watermark", "sign", "properties", "attachments", "-", "print", "printPreview", "printPdf", "-", "settings"] },
+  { title: "File", items: ["new", "open", "newTab", "closeTab", "prevTab", "nextTab", "-", "save", "saveAs", "encrypt", "import", "mergePdfs", "combineNew", "compress", "watermark", "sign", "properties", "-", "print", "printPreview", "printPdf", "-", "settings"] },
   { title: "Export", items: ["exportText", "exportCsv", "exportImages", "exportRtf", "exportDocx", "exportOdt"] },
   { title: "Edit", items: ["undo", "redo", "-", { submenu: "clipboard" }, "-", "find", "findNext", "findPrev", "-", "rotateCw", "rotateCcw", "rotateAll", "delete", "addPage", "-", "selectAll", "-", "select", "editText", "objDelete", "recolor", "font", "image", "shapes", "ocr"] },
   { title: "Pages", items: ["extract", "split", "autoCrop"] },

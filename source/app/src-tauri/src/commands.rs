@@ -946,7 +946,42 @@ fn write_atomic(target: &std::path::Path, bytes: &[u8]) -> Result<CommitResult, 
 /// Open the macOS print panel for the window (the page prints whatever the
 /// frontend placed in its print-only layer).
 #[tauri::command]
-pub fn print_window(window: tauri::WebviewWindow) -> Result<(), EngineError> {
+pub fn print_window(window: tauri::WebviewWindow, width: Option<f64>, height: Option<f64>, landscape: Option<bool>) -> Result<(), EngineError> {
+    #[cfg(target_os = "macos")]
+    if let (Some(w), Some(h)) = (width, height) {
+        // The print layer is laid out one sheet per page at exactly this paper
+        // size: tell macOS the same paper, orientation and no margins, or the
+        // default paper (with 1" margins) splits each sheet over two pages.
+        let landscape = landscape.unwrap_or(false);
+        return window
+            .with_webview(move |wv| unsafe {
+                use objc2_app_kit::{NSPaperOrientation, NSPrintInfo, NSPrintingPaginationMode};
+                use objc2_foundation::NSSize;
+                let view: &objc2_web_kit::WKWebView = &*(wv.inner() as *const objc2_web_kit::WKWebView);
+                let info = NSPrintInfo::sharedPrintInfo();
+                // Paper size is always given portrait; orientation turns it.
+                let (pw, ph) = if w <= h { (w, h) } else { (h, w) };
+                info.setPaperSize(NSSize::new(pw, ph));
+                info.setOrientation(if landscape { NSPaperOrientation::Landscape } else { NSPaperOrientation::Portrait });
+                info.setTopMargin(0.0);
+                info.setBottomMargin(0.0);
+                info.setLeftMargin(0.0);
+                info.setRightMargin(0.0);
+                info.setHorizontalPagination(NSPrintingPaginationMode::Fit);
+                info.setVerticalPagination(NSPrintingPaginationMode::Automatic);
+                info.setHorizontallyCentered(true);
+                info.setVerticallyCentered(false);
+                let op = view.printOperationWithPrintInfo(&info);
+                op.setShowsPrintPanel(true);
+                op.setShowsProgressPanel(true);
+                op.setCanSpawnSeparateThread(true);
+                if let Some(win) = view.window() {
+                    op.runOperationModalForWindow_delegate_didRunSelector_contextInfo(&win, None, None, std::ptr::null_mut());
+                }
+            })
+            .map_err(|e| EngineError::new(ErrorCode::IoError, e.to_string()));
+    }
+    let _ = (width, height, landscape);
     window.print().map_err(|e| EngineError::new(ErrorCode::IoError, e.to_string()))
 }
 

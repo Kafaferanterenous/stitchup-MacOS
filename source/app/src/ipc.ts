@@ -119,6 +119,10 @@ export interface PageObject {
   kind: "text" | "image" | "graphic";
   text: string;
   rect: [number, number, number, number];
+  /** Text only: font name, size on the page (pt), fill colour. */
+  font?: string;
+  size?: number;
+  color?: string;
 }
 export const cmdListObjects = (page: number) => cmd<PageObject[]>("list_objects", { page });
 export const cmdObjectOp = (page: number, data: unknown) => cmd<PageMeta[]>("object_op", { page, data });

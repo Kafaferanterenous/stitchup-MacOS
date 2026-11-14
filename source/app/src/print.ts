@@ -62,7 +62,8 @@ export async function printDocument(session: RenderSession, rotations: Map<numbe
     const el = document.createElement("div");
     el.className = "print-sheet";
     el.style.width = `${sheet.w}pt`;
-    el.style.height = `${sheet.h}pt`;
+    // A hair under the paper height: rounding must never spill onto a second page.
+    el.style.height = `${sheet.h - 1}pt`;
     const im = document.createElement("img");
     im.src = img.url;
     im.style.left = `${f.x}pt`;
@@ -80,7 +81,8 @@ export async function printDocument(session: RenderSession, rotations: Map<numbe
   // Wait for the images to decode so the print panel never sees blanks.
   await Promise.all([...root.querySelectorAll("img")].map((i) => i.decode().catch(() => {})));
   try {
-    await invoke("print_window");
+    // Same paper, orientation and zero margins in the macOS print settings.
+    await invoke("print_window", { width: opts.paper.w, height: opts.paper.h, landscape: opts.landscape });
   } catch {
     window.print();
   }

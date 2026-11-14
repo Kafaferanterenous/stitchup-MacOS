@@ -2,7 +2,7 @@
 
 Target: the best all-round PDF editor, at feature and look parity with the
 Windows build (github.com/Kafaferanterenous/stitchup-Win v0.12.28), and ahead of it where macOS allows.
-Updated 2026-11-14 (v0.6.0). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
+Updated 2026-11-14 (v0.6.1). Status key: ✅ done · 🔨 in progress · ⬜ to do. Every ✅ item is covered by an automated test.
 
 ## A. Look & navigation (same as Windows)
 | # | Goal | Status |
@@ -21,8 +21,8 @@ Updated 2026-11-14 (v0.6.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | B2 | Save in place (atomic) + Save As | ✅ |
 | B3 | Import / Merge PDFs; Combine into New — Import, Merge PDFs, Combine into New | ✅ |
 | B4 | Export Text / CSV / Images (PNG, JPG) / RTF / DOCX / ODT | ✅ |
-| B5 | Print, Print Preview, Print to PDF — preview dialog + macOS print panel (Save as PDF there); not yet tried on a real printer | ✅ |
-| B6 | Document Properties ✅, Attachments list + save | ✅ |
+| B5 | Print, Print Preview, Print to PDF — preview dialog + macOS print panel (Save as PDF there); the print panel gets the chosen paper, orientation and no margins, one printed page per selected page (v0.6.1 fix for "1 of 2"); not yet tried on a real printer | ✅ |
+| B6 | Document Properties ✅ · Attachments button removed for now (v0.6.1, user request); the code is kept | ✅ |
 | B7 | Compress PDF — unused objects removed + streams/object streams compressed; image downsampling still to do | ✅ |
 | B8 | Crash-recovery snapshots (Off / 30 s / 1 min / 5 min, off by default like Windows) offered back after a crash; Settings (⌘,); quitting or closing the window with unsaved changes asks | ✅ |
 | B9 | Built-in User Guide (F1) — in-app guide (F1) rather than a help.pdf | ✅ |
@@ -50,7 +50,7 @@ Updated 2026-11-14 (v0.6.0). Status key: ✅ done · 🔨 in progress · ⬜ to 
 | E1 | In-place text edit in the original font | ✅ |
 | E2 | Unicode fallback font (Polish ą ł etc. when the original font lacks them) — Central European Latin (Polish ą ł ż…), Baltic, Turkish, Romanian; Cyrillic/Greek/CJK still to do | ✅ |
 | E3 | Select / move / delete content objects (text, images, paths), marquee select — text runs and images (vector paths not yet selectable); move, delete, marquee, ⌘-click | ✅ |
-| E4 | Recolor, Font & size, Fore/Back colours — recolour text, font family/bold/italic/size, Fore/Back colours, vector shapes into the page | ✅ |
+| E4 | Recolor, Font & size, Fore/Back colours — colour palettes on Fore / Back / Annotate ▸ Colour (Fore recolours the selection at once); while editing a line a bar shows its real font and size and changes font, bold/italic, size and colour | ✅ |
 | E5 | Insert image — PNG (with transparency), JPEG (embedded as-is), GIF/WebP/HEIC/TIFF | ✅ |
 
 ## F. Security & forms

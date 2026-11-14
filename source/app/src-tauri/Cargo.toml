@@ -1,6 +1,6 @@
 [package]
 name = "stitchup"
-version = "0.6.0"
+version = "0.6.1"
 description = "Stitchup — clean-room, offline-first PDF editor (Tauri 2 host for stitchup-core)"
 license = "MIT OR Apache-2.0"
 edition = "2021"
@@ -24,3 +24,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "stitchup"
 path = "src/main.rs"
+
+# Native print settings (paper size, orientation, no margins) for the web view.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSView", "NSWindow"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }

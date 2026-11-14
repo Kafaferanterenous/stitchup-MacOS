@@ -1024,3 +1024,22 @@ project root on 2026-09-30 13:51 from outside this session — decide its fate.
 - Tests: e2e viewport 1280×960 (drag-reorder test needed the room).
 - TESTS: core 45 (ocr 2 and a third sign test new), command layer 9, e2e 74/74 (tabs, recovery after a SIGKILLed
   backend, quit prompt, settings, double signature verified by OpenSSL, OCR with real Vision).
+
+2026-11-14 — v0.6.1: USER FEEDBACK (print page count, colours, font bar, attachments)
+- Print "1 of 2" for one page: wry printed with the shared NSPrintInfo (default paper), and every
+  sheet had break-after (blank last page). print_window now sets paper size, orientation and zero
+  margins on NSPrintInfo (objc2) before WKWebView.printOperationWithPrintInfo; last sheet has no
+  break; sheets are 1pt under the paper height. e2e renders the print layer with page.pdf() and
+  counts pages (4 sheets → 4 pages; current page → 1 page).
+- Fore / Back / Annotate ▸ Colour "did nothing": the hidden <input type=color> opened no picker in
+  the macOS web view. New ColorPalette pop-up (24 colours, hex code, No fill / Default). Fore with a
+  selection (or a line being edited) recolours at once; Annotate ▸ Colour is its own colour (annColor)
+  used by every new annotation including highlight (default stays yellow).
+- Edit bar above the line being edited: real font name and size (objects::list now reports
+  font/size/colour for text), Original font / Helvetica / Times / Courier, B / I, size, colour.
+  Editing switches the ribbon to Content; Fore / Font / Recolor target the open line (store.editingLine).
+  Typed text is saved first, then the format applied, then the editor reopens on the line.
+- core set_font: sizes are page sizes (divided by the text-matrix scale; Tf 1 + Tm 12 was wrong);
+  family "" keeps the original font and changes only the size.
+- Attachments removed from the ribbon and File menu.
+- TESTS: core 46, command layer 9, e2e 76/76.

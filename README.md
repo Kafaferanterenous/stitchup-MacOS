@@ -30,7 +30,9 @@ not notarized. The first time you open it, right-click it and choose
 - **Edit text in place:** double-click a line, or use Content ▸ Edit Text. The
   text is changed in the PDF in the original font. If that font lacks a letter,
   the line is redrawn in the closest standard font, with full Polish and other
-  Central European letters (ą ć ę ł ń ó ś ź ż).
+  Central European letters (ą ć ę ł ń ó ś ź ż). While you edit, a bar above
+  the line shows its font and size and lets you change font, bold, italic,
+  size and colour.
 - **Annotate:** highlight, underline and strike-out snap to the text. Also
   sticky notes, text boxes, shapes (rectangle, oval, line, arrow), stamps,
   links and freehand pen. All are real PDF annotations, so they look the same
@@ -76,7 +78,7 @@ Tests:
 |---|---|
 | `cd source/core && cargo test --release` | PDF engine: text editing, annotations, redaction, forms, signatures (checked with OpenSSL), page tree |
 | `cd source/app/src-tauri && cargo test --release` | Command layer |
-| `cd source/app && npm run build && npm run test:e2e` | 74 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
+| `cd source/app && npm run build && npm run test:e2e` | 76 end-to-end checks: the real UI in Chromium driving the real Rust backend, with every ribbon tab, dialog and shortcut |
 
 ## Layout
 

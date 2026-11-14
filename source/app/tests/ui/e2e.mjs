@@ -18,7 +18,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, StandardFonts, rgb } from "pdf-lib";
 import zlib from "node:zlib";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 
@@ -351,7 +351,7 @@ await check("starts like Windows: 7 ribbon tabs, empty-state hint, status bar", 
 
 await check("Document tab has the Windows button set", async () => {
   const labels = await page.locator(".ribbon-card .rb-text").allInnerTexts();
-  const want = "New,Open,Save,Save As,Properties,Attachments,Import,Export Text,Export CSV,Images,RTF,DOCX,ODT,Print,Preview,to PDF";
+  const want = "New,Open,Save,Save As,Properties,Import,Export Text,Export CSV,Images,RTF,DOCX,ODT,Print,Preview,to PDF";
   assert(labels.join() === want, labels.join());
 });
 
@@ -860,12 +860,9 @@ await check("Content ▸ Recolor and Font change the selected text", async () =>
 });
 
 await check("Content ▸ Fore/Back colours and Shapes ▾ insert into the page", async () => {
-  await page.evaluate(() => {
-    const i = document.querySelector('input[aria-label="Fore colour"]');
-    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    set.call(i, "#1a7f37");
-    i.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  await tab("Content");
+  await rb("fore").click();
+  await page.locator('.color-palette [aria-label="#1a7f37"]').click();
   assert((await page.evaluate(() => window.__stitchup.state().foreColor)) === "#1a7f37", "fore colour set");
   await rb("shapes").click();
   await page.locator(".rb-choices").getByRole("menuitem", { name: "Oval" }).click();
@@ -989,6 +986,107 @@ await check("Content ▸ OCR makes a scanned (image-only) page searchable; Undo 
   await waitStatus(/Undid/);
   const st = await page.evaluate(() => window.__stitchup.state().doc.pages.length);
   assert(st === 1, "still one page");
+  await page.locator(".doc-tab", { hasText: "main.pdf" }).click();
+  await waitStatus(/main\.pdf/);
+  openPath = MAIN;
+});
+
+await check("colour palettes: Fore / Back / Annotate ▸ Colour open a palette and take effect", async () => {
+  const f = path.join(WORK, "colours.pdf");
+  await makePdf(f, [LETTER, LETTER]);
+  await openViaRibbon(f);
+  await tab("Content");
+  await rb("fore").click();
+  await page.locator(".color-palette").waitFor();
+  await page.locator('.color-palette [aria-label="#1d5fd0"]').click();
+  await waitNotice(/Text colour #1d5fd0/);
+  assert((await page.evaluate(() => window.__stitchup.state().foreColor)) === "#1d5fd0", "fore set");
+  assert(/rgb\(29, 95, 208\)/.test(await rb("fore").locator(".rb-swatch").evaluate((el) => el.style.background)), "swatch shows it");
+  await rb("back").click();
+  await page.locator(".color-palette").getByRole("menuitem", { name: "No fill" }).click();
+  assert((await page.evaluate(() => window.__stitchup.state().backColor)) === null, "back none");
+  await rb("back").click();
+  await page.locator(".color-palette").getByLabel("Colour code").fill("#123456");
+  await page.locator(".color-palette").getByRole("button", { name: "Use" }).click();
+  assert((await page.evaluate(() => window.__stitchup.state().backColor)) === "#123456", "custom back");
+  // Select a line, Fore recolours it straight away.
+  await rb("select").click();
+  await page.waitForSelector('[data-page="1"] .obj-box.text');
+  const rb1 = await runBox(1, "The quick brown fox jumps over the lazy dog.");
+  await page.mouse.click(rb1.x + 10, rb1.y + rb1.height / 2);
+  await page.waitForFunction(() => window.__stitchup.state().picked?.objects.length > 0);
+  await rb("fore").click();
+  await page.locator('.color-palette [aria-label="#1a7f37"]').click();
+  await waitStatus(/Recoloured/);
+  const objs = await ipc("list_objects", { page: 1 });
+  assert(objs.find((o) => o.text.startsWith("The quick")).color === "#1a7f37", JSON.stringify(objs.map((o) => [o.text, o.color])));
+  await page.keyboard.press("Escape");
+  if (await page.evaluate(() => window.__stitchup.state().tool)) await rb("select").click(); // Select tool off
+  // Annotate ▸ Colour is used by the next annotation (highlight included).
+  await tab("Annotate");
+  await rb("annFore").click();
+  await page.locator('.color-palette [aria-label="#7ed321"]').click();
+  await waitNotice(/Annotation colour #7ed321/);
+  await rb("annHighlight").click();
+  const line = page.locator('[data-page="1"] .text-run', { hasText: "Line two on page 1" }).first();
+  const lb = await line.boundingBox();
+  await page.mouse.move(lb.x + 2, lb.y + lb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lb.x + lb.width - 2, lb.y + lb.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await waitStatus(/Added highlight/);
+  await page.keyboard.press("Escape");
+  const out = path.join(WORK, "colours-out.pdf");
+  await pick(out);
+  await tab("Document");
+  await rb("saveAs").click();
+  await waitStatus(/colours-out\.pdf/);
+  const d = await PDFDocument.load(await readFile(out));
+  const annots = d.getPage(0).node.Annots();
+  const hl = annots.asArray().map((r) => d.context.lookup(r)).find((a) => a.get(PDFName.of("Subtype")).toString() === "/Highlight");
+  const c = hl.get(PDFName.of("C")).asArray().map((n) => Math.round(n.asNumber() * 255));
+  assert(c.join() === "126,211,33", `highlight colour ${c}`);
+  await page.evaluate(() => window.__stitchup.store.pickColor("ann", null));
+  await page.locator('[data-thumb="2"] .thumb').click();
+  await waitStatus(/Page 2 of 2/);
+});
+
+await check("editing a line shows its font & size; the bar changes size, colour and font (typed text kept)", async () => {
+  await page.locator('[data-thumb="2"] .thumb').click();
+  await waitStatus(/Page 2 of 2/);
+  await tab("Zoom");
+  const line = page.locator('[data-page="2"] .text-run', { hasText: "Line two on page 2" }).first();
+  await line.scrollIntoViewIfNeeded();
+  await line.dblclick();
+  await page.locator(".edit-bar").waitFor();
+  assert((await page.locator(".ribbon-tab.active").innerText()) === "Content", "switched to the Content tab");
+  await page.waitForFunction(() => /^Helvetica · 14 pt$/.test(document.querySelector(".edit-bar-font")?.textContent ?? ""));
+  assert(await rb("font").isEnabled(), "Font button live while editing");
+  const find = async (t) => (await ipc("list_objects", { page: 2 })).find((o) => o.text.startsWith(t));
+  // Size
+  await page.locator(".edit-bar").getByLabel("Font size").fill("18");
+  await page.locator(".edit-bar").getByLabel("Font size").press("Enter");
+  await waitStatus(/Size: 18 pt/);
+  await page.locator(".inline-editor").waitFor();
+  assert((await find("Line two")).size === 18, "size 18");
+  await page.waitForFunction(() => /Helvetica · 18 pt/.test(document.querySelector(".edit-bar-font")?.textContent ?? ""));
+  // Colour from the ribbon while the line is open
+  await rb("fore").click();
+  await page.locator('.color-palette [aria-label="#d0021b"]').click();
+  await waitStatus(/Recoloured the line/);
+  assert((await find("Line two")).color === "#d0021b", "line recoloured");
+  // Type, then pick a font: the typed text is saved, then the font applied.
+  await page.locator(".inline-editor").waitFor();
+  await page.locator(".inline-editor").fill("Line two, rewritten");
+  await page.locator(".edit-bar").getByLabel("Font", { exact: true }).selectOption("Times");
+  await waitStatus(/Font: Times-Roman/);
+  const o = await find("Line two, rewritten");
+  assert(o && o.font === "Times-Roman" && o.size === 18 && o.color === "#d0021b", JSON.stringify(o));
+  await page.locator(".inline-editor").press("Escape");
+  await page.waitForFunction(() => !document.querySelector(".edit-bar"));
+  // Close this tab without saving.
+  await pick("Close");
+  await page.locator(".doc-tab.active .doc-tab-close").click();
   await page.locator(".doc-tab", { hasText: "main.pdf" }).click();
   await waitStatus(/main\.pdf/);
   openPath = MAIN;
@@ -1124,6 +1222,18 @@ await check("Print: preview sheet, then one fitted sheet per page goes to the pr
   assert(sheets === 4, `${sheets} sheets`);
   const w = await page.locator("#print-root .print-sheet").first().evaluate((el) => el.style.width);
   assert(w === "792pt", `landscape Letter sheet width ${w}`);
+  // What the print engine paginates: exactly one printed page per sheet.
+  const printed = async () => (await PDFDocument.load(await page.pdf({ width: "11in", height: "8.5in", preferCSSPageSize: true }))).getPageCount();
+  assert((await printed()) === 4, `printed pages: ${await printed()}`);
+  // One page chosen → one page printed (an extra blank page was reported).
+  await rb("print").click();
+  await page.getByLabel("Print range").selectOption("current");
+  await page.getByLabel("Paper").selectOption("A4");
+  const b2 = await calls("print_window");
+  await btn("Print…").click();
+  await page.waitForFunction((b) => window.__calls.filter((c) => c === "print_window").length > b, b2, { timeout: 15000 });
+  const one = (await PDFDocument.load(await page.pdf({ width: "8.27in", height: "11.69in", preferCSSPageSize: true }))).getPageCount();
+  assert(one === 1, `one page selected → ${one} printed`);
 });
 
 // ---- Save in place / Save As
@@ -1471,18 +1581,11 @@ await check("malformed PDF shows an error and the app stays usable", async () =>
   assert(/of 4/.test(await status()), `good file opens after a bad one: ${await status()}`);
 });
 
-await check("XFA warning badge and Attachments list + save", async () => {
+await check("XFA warning badge; no Attachments button (removed for now)", async () => {
   await openViaRibbon(path.join(FIX, "F-13_xfa.pdf"));
   await page.waitForSelector(".status-warn");
-  await openViaRibbon(path.join(FIX, "F-10_attachments.pdf"));
-  await rb("attachments").click();
-  await page.waitForSelector(".modal .license-table tbody tr");
-  const target = path.join(WORK, "attached.bin");
-  await pick(target);
-  await page.locator(".modal").getByRole("button", { name: "Save…" }).first().click();
-  await waitNotice(/Saved /);
-  assert((await stat(target)).size > 0, "attachment written");
-  await btn("Close").click();
+  await tab("Document");
+  assert((await rb("attachments").count()) === 0, "Attachments button still on the ribbon");
 });
 
 // ---- Real-world PDF with a nested page tree (if present on this Mac)

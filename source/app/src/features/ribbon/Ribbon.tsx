@@ -3,15 +3,15 @@
 //! Navigate · Security) and one card of icon-over-caption buttons. Every
 //! button comes from the command registry (src/commands.ts).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppState, store, RIBBON_TABS } from "../../store";
 import { COMMANDS, runCommand, type Command } from "../../commands";
 import { Icon } from "./icons";
+import { ColorPalette } from "../common/ColorPalette";
 
 function RibbonButton({ cmd }: { cmd: Command }) {
   const app = useAppState();
   const [open, setOpen] = useState(false);
-  const colorRef = useRef<HTMLInputElement | null>(null);
   const enabled = !app.busy && (!cmd.enabled || cmd.enabled(app));
   const active = cmd.active?.(app) ?? false;
   const dirty = cmd.id === "save" && store.isDirty();
@@ -19,7 +19,7 @@ function RibbonButton({ cmd }: { cmd: Command }) {
   // Menu bar / shortcut asked to show this button's drop-down or colour picker.
   useEffect(() => {
     const onChoices = (e: Event) => (e as CustomEvent).detail === cmd.id && setOpen(true);
-    const onSwatch = (e: Event) => cmd.swatch && (e as CustomEvent).detail === cmd.swatch && cmd.tab === app.ribbonTab && colorRef.current?.click();
+    const onSwatch = (e: Event) => cmd.swatch && (e as CustomEvent).detail === cmd.swatch && cmd.tab === app.ribbonTab && setOpen(true);
     window.addEventListener("stitchup-choices", onChoices);
     window.addEventListener("stitchup-swatch", onSwatch);
     return () => {
@@ -43,29 +43,23 @@ function RibbonButton({ cmd }: { cmd: Command }) {
     };
   }, [open]);
 
-  const swatchColor = cmd.swatch === "fore" ? app.foreColor : cmd.swatch === "back" ? app.backColor : null;
+  const swatchColor = cmd.swatch === "fore" ? app.foreColor : cmd.swatch === "back" ? app.backColor : cmd.swatch === "ann" ? app.annColor ?? app.foreColor : null;
 
   return (
     <span className="rb-wrap">
       <button
         type="button"
-        className={`rb-btn${active ? " active" : ""}${dirty ? " dirty" : ""}${cmd.choices ? " has-choices" : ""}`}
+        className={`rb-btn${active ? " active" : ""}${dirty ? " dirty" : ""}${cmd.choices || cmd.swatch ? " has-choices" : ""}`}
+        // Ribbon buttons never take focus: a line being edited stays open.
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
-          if (cmd.choices) setOpen((o) => !o);
-          else if (cmd.swatch) colorRef.current?.click();
+          if (cmd.choices || cmd.swatch) setOpen((o) => !o);
           else void runCommand(cmd.id);
-        }}
-        onContextMenu={(e) => {
-          if (cmd.swatch === "back") {
-            e.preventDefault();
-            store.setColors({ back: null });
-            store.notify("Back colour: no fill");
-          }
         }}
         disabled={!enabled}
         aria-pressed={cmd.active ? active : undefined}
-        aria-haspopup={cmd.choices ? "menu" : undefined}
-        aria-expanded={cmd.choices ? open : undefined}
+        aria-haspopup={cmd.choices || cmd.swatch ? "menu" : undefined}
+        aria-expanded={cmd.choices || cmd.swatch ? open : undefined}
         data-cmd={cmd.id}
         title={dirty ? `${cmd.tip} — unsaved changes` : cmd.tip}>
         <span className="rb-icon">
@@ -77,18 +71,22 @@ function RibbonButton({ cmd }: { cmd: Command }) {
         </span>
         <span className="rb-text">
           {cmd.label}
-          {cmd.choices ? " ▾" : ""}
+          {cmd.choices || cmd.swatch ? " ▾" : ""}
         </span>
       </button>
-      {cmd.swatch && (
-        <input
-          ref={colorRef}
-          type="color"
-          className="rb-color-input"
-          aria-label={`${cmd.label} colour`}
-          value={swatchColor ?? "#ffffff"}
-          onChange={(e) => store.setColors(cmd.swatch === "fore" ? { fore: e.target.value } : { back: e.target.value })}
-        />
+      {open && cmd.swatch && (
+        <div className="rb-choices rb-palette">
+          <ColorPalette
+            label={`${cmd.label} colour`}
+            value={swatchColor}
+            allowNone={cmd.swatch !== "fore"}
+            noneLabel={cmd.swatch === "ann" ? "Default colours" : "No fill"}
+            onPick={(c) => {
+              setOpen(false);
+              void store.pickColor(cmd.swatch!, c);
+            }}
+          />
+        </div>
       )}
       {open && cmd.choices && (
         <div className="rb-choices" role="menu" onMouseDown={(e) => e.stopPropagation()}>
@@ -97,6 +95,7 @@ function RibbonButton({ cmd }: { cmd: Command }) {
               key={c.label}
               role="menuitem"
               className={c.active ? "active" : ""}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setOpen(false);
                 c.run();

@@ -1,9 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { useAppState, store } from "../../store";
+import { useAppState, store, getState, type FormatOp, type EditingLine } from "../../store";
 import { bind, unbind, renderPage, getTextRuns, RenderSession, RenderedPage } from "../../adapters/renderAdapter";
 import type { TextRun } from "../../types";
 import { extractTo } from "../../actions";
 import { PageOverlay } from "./PageOverlay";
+import { EditBar, runBox } from "./EditBar";
+
+/** Places that may take focus without closing the line editor. */
+const EDIT_CHROME = ".inline-editor, .edit-bar, .ribbon, .rb-choices, .modal, .modal-backdrop";
 
 // ------------------------------------------------------------ text metrics
 
@@ -157,6 +161,7 @@ function InlineEditor({
   pending,
   onCommit,
   onCancel,
+  onText,
 }: {
   run: TextRun;
   zoom: number;
@@ -164,8 +169,12 @@ function InlineEditor({
   pending: string | null;
   onCommit: (c: Commit) => void;
   onCancel: () => void;
+  onText: (t: string) => void;
 }) {
   const [text, setText] = useState(run.str);
+  useEffect(() => {
+    onText(run.str);
+  }, [run, onText]);
   const ref = useRef<HTMLInputElement | null>(null);
   const done = useRef(false);
   const sizePx = run.fontSize * zoom;
@@ -181,10 +190,21 @@ function InlineEditor({
   }, [caret, pending]);
 
   function finish(move: Commit["move"]) {
-    if (done.current) return;
+    if (done.current || pending !== null) return;
     done.current = true;
     onCommit({ text, move });
   }
+
+  // Focus may sit in the format bar / a dialog: a click anywhere else saves.
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(EDIT_CHROME)) finishRef.current(0);
+    };
+    window.addEventListener("mousedown", onDown, true);
+    return () => window.removeEventListener("mousedown", onDown, true);
+  }, []);
 
   return (
     <input
@@ -203,7 +223,10 @@ function InlineEditor({
         fontFamily: run.fontFamily,
         letterSpacing: sx !== 1 ? `${(sx - 1) * sizePx * 0.5}px` : undefined,
       }}
-      onChange={(e) => setText(e.target.value)}
+      onChange={(e) => {
+        setText(e.target.value);
+        onText(e.target.value);
+      }}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "Enter") {
@@ -218,7 +241,11 @@ function InlineEditor({
           onCancel();
         }
       }}
-      onBlur={() => finish(0)}
+      onBlur={(e) => {
+        // Moving to the format bar, the ribbon or a dialog keeps the line open.
+        if ((e.relatedTarget as HTMLElement | null)?.closest?.(EDIT_CHROME)) return;
+        finish(0);
+      }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     />
@@ -312,6 +339,17 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
   const [menu, setMenu] = useState<{ x: number; y: number; run: number | null } | null>(null);
   // Index to open after the next re-render (Tab navigation).
   const nextEdit = useRef<{ from: TextRun; move: 1 | -1 } | null>(null);
+  // Format bar: the editor's current text, and the line to reopen after a format change.
+  const typed = useRef<string | null>(null);
+  const onText = useRef((t: string) => {
+    typed.current = t;
+  }).current;
+  const reopenAt = useRef<{ x: number; y: number } | null>(null);
+  const formatting = useRef(false);
+  const missed = useRef(false);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  const runsRef = useRef<TextRun[]>([]);
 
   const meta = app.doc?.pages.find((p) => p.page_no === pageNo);
   const rotation = meta?.rotation ?? 0;
@@ -363,20 +401,39 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
       .then((r) => {
         if (!alive) return;
         setRuns(r);
-        // A pending edit is done once the re-rendered text arrives.
-        setEditing((ed) => (ed?.pending != null ? null : ed));
-        const nx = nextEdit.current;
-        if (nx) {
-          nextEdit.current = null;
-          const i = neighbourRun(r, nx.from, nx.move);
-          if (i !== null) setEditing({ index: i, caret: r[i].str.length, pending: null });
+        runsRef.current = r;
+        if (formatting.current) {
+          // Keep showing the pending text until the format is applied.
+          missed.current = true;
+          return;
         }
+        reopen(r);
       })
       .catch(() => alive && setRuns([]));
     return () => {
       alive = false;
     };
   }, [visible, inRange, upright, session, pageNo]);
+
+  function reopen(r: TextRun[]) {
+    {
+        // A pending edit is done once the re-rendered text arrives.
+        setEditing((ed) => (ed?.pending != null ? null : ed));
+        const at = reopenAt.current;
+        if (at) {
+          reopenAt.current = null;
+          const i = r.findIndex((x) => Math.abs(x.origin.x - at.x) < 1.5 && Math.abs(x.origin.y - at.y) < 1.5);
+          if (i >= 0) setEditing({ index: i, caret: r[i].str.length, pending: null });
+          return;
+        }
+        const nx = nextEdit.current;
+        if (nx) {
+          nextEdit.current = null;
+          const i = neighbourRun(r, nx.from, nx.move);
+          if (i !== null) setEditing({ index: i, caret: r[i].str.length, pending: null });
+        }
+    }
+  }
 
   // Paint after React applied the canvas backing size (resizing clears it).
   useEffect(() => {
@@ -389,6 +446,48 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
   useEffect(() => {
     if (!app.editMode) setEditing((ed) => (ed?.pending != null ? ed : null));
   }, [app.editMode]);
+
+  /** Format bar / ribbon Fore / Font while editing: save typed text, then restyle the line. */
+  async function applyFormat(data: FormatOp): Promise<boolean> {
+    const ed = editingRef.current;
+    const run = ed ? runsRef.current[ed.index] : null;
+    if (!ed || !run || ed.pending !== null) return false;
+    const next = (typed.current ?? run.str).replace(/\s+$/u, "");
+    const old = run.str.replace(/\s+$/u, "");
+    if (!next) return false;
+    formatting.current = true;
+    missed.current = false;
+    reopenAt.current = { x: run.origin.x, y: run.origin.y };
+    setEditing({ index: ed.index, caret: 0, pending: next });
+    let ok = true;
+    if (next !== old) {
+      ok = !!(await store.editText({ page: pageNo, x: run.origin.x, y: run.origin.y, width: run.pdfWidth, font_size: run.fontSize, old_text: run.str, new_text: next }));
+    }
+    if (ok) ok = await store.formatLine(pageNo, runBox(run, Math.max(1, next.length / Math.max(1, old.length))), data);
+    formatting.current = false;
+    // The re-rendered text may already have arrived while we were busy.
+    if (ok && missed.current) reopen(runsRef.current);
+    if (!ok && next === old) {
+      // Nothing changed: back to editing the same line.
+      reopenAt.current = null;
+      setEditing({ index: ed.index, caret: old.length, pending: null });
+    }
+    return ok;
+  }
+  const applyRef = useRef(applyFormat);
+  applyRef.current = applyFormat;
+
+  // While a line is open: Content tab, and Fore / Font / Recolor target it.
+  const editingOpen = !!editing && editing.pending === null;
+  useEffect(() => {
+    if (!editingOpen) return;
+    const line: EditingLine = { page: pageNo, apply: (d) => applyRef.current(d) };
+    store.setEditingLine(line);
+    if (getState().ribbonTab !== "Content") store.setRibbonTab("Content");
+    return () => {
+      if (getState().editingLine === line) store.setEditingLine(null);
+    };
+  }, [editingOpen, pageNo]);
 
   async function commit(index: number, c: Commit) {
     const run = runs[index];
@@ -525,8 +624,10 @@ function PageView({ session, pageNo }: { session: RenderSession; pageNo: number 
           pending={editing.pending}
           onCommit={(c) => void commit(editing.index, c)}
           onCancel={() => setEditing(null)}
+          onText={onText}
         />
       )}
+      {editing && editRun && editing.pending === null && <EditBar key={`bar:${editing.index}:${editRun.str}`} run={editRun} page={pageNo} zoom={app.zoom} />}
     </div>
   );
 }

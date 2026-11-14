@@ -50,6 +50,7 @@ import {
   cmdRestoreRecovery,
   cmdClearRecovery,
   cmdOcrRecognize,
+  cmdListObjects,
   cmdOcrApply,
   type OcrLine,
 } from "./ipc";
@@ -125,6 +126,10 @@ export interface AppState {
   foreColor: string;
   /** Windows "Back" colour: fill of new shapes (null = no fill). */
   backColor: string | null;
+  /** Annotate ▸ Colour (null = each tool's default: yellow highlight, red pen…). */
+  annColor: string | null;
+  /** The line open in the inline text editor (Fore / Font apply to it). */
+  editingLine: EditingLine | null;
   strokeWidth: number;
   /** Select tool: picked content objects ("t12"/"i30") and annotations (obj #). */
   picked: { page: number; objects: string[]; annots: number[] } | null;
@@ -254,6 +259,8 @@ let state: AppState = {
   stampLabel: "Approved",
   foreColor: "#d0021b",
   backColor: null,
+  annColor: null,
+  editingLine: null,
   strokeWidth: 2,
   picked: null,
   pendingInput: null,
@@ -291,6 +298,20 @@ const EMPTY_SLICE: TabSlice = {
 };
 
 /** "#rrggbb" → [r, g, b] in 0..1. */
+export type FormatOp = { op: "recolor" | "font"; color?: number[]; family?: string; size?: number };
+
+export interface EditingLine {
+  page: number;
+  /** Apply a colour / font change to the line (commits typed text first). */
+  apply: (data: FormatOp) => Promise<boolean>;
+}
+
+const HIGHLIGHT_DEFAULT = "#ffeb3b";
+/** Colour for an annotation tool: Annotate ▸ Colour if chosen, else its default. */
+export function annotColor(s: AppState, tool: "highlight" | "other"): string {
+  return s.annColor ?? (tool === "highlight" ? HIGHLIGHT_DEFAULT : s.foreColor);
+}
+
 export function rgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", ""), 16);
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
@@ -623,6 +644,35 @@ export const store = {
     });
   },
 
+  setEditingLine(l: EditingLine | null) {
+    if (state.editingLine !== l) set({ editingLine: l });
+  },
+
+  /**
+   * A colour picked from a ribbon palette. Fore recolours the selected text
+   * (or the line being edited) right away and is used by new shapes; Back is
+   * the fill for new shapes; Annotate ▸ Colour is used by new annotations.
+   */
+  async pickColor(which: "fore" | "back" | "ann", hex: string | null) {
+    if (which === "ann") {
+      set({ annColor: hex });
+      notify(hex ? `Annotation colour ${hex} — used by the next highlight, underline, strike-out, pen, shape or text box` : "Annotation colours reset to defaults");
+      return;
+    }
+    if (which === "back") {
+      set({ backColor: hex });
+      notify(hex ? `Fill colour ${hex} — used by the next shape you draw` : "Fill: none — new shapes are outlines");
+      return;
+    }
+    if (!hex) return;
+    set({ foreColor: hex });
+    if (state.picked?.objects.length || state.editingLine) {
+      await this.objectOp({ op: "recolor", color: rgb(hex) });
+    } else {
+      notify(`Text colour ${hex} — select text (or double-click a line) to recolour it; also used for new shape outlines`);
+    }
+  },
+
   setPicked(picked: AppState["picked"]) {
     set({ picked });
   },
@@ -780,9 +830,10 @@ export const store = {
     return ok;
   },
 
-  async objectOp(data: { op: "recolor" | "font"; color?: number[]; family?: string; size?: number }) {
+  async objectOp(data: FormatOp) {
     const p = state.picked;
     const doc = state.doc;
+    if ((!p || !p.objects.length) && state.editingLine) return state.editingLine.apply(data);
     if (!p || !doc || !p.objects.length) {
       notify("Select text first (Content ▸ Select, then click a line)");
       return false;
@@ -794,6 +845,33 @@ export const store = {
     );
     set({ picked: null });
     return ok;
+  },
+
+  /** Text objects making up one line (PDF box around its baseline). */
+  async lineObjects(page: number, box: [number, number, number, number]) {
+    const objs = await cmdListObjects(page);
+    return objs.filter((o) => {
+      if (o.kind !== "text") return false;
+      const cy = (o.rect[1] + o.rect[3]) / 2;
+      return cy >= box[1] && cy <= box[3] && o.rect[0] >= box[0] - 2 && o.rect[0] < box[2];
+    });
+  },
+
+  /** Recolour / change the font of the line at `box` — one undo step. */
+  async formatLine(page: number, box: [number, number, number, number], data: FormatOp) {
+    const doc = state.doc;
+    if (!doc) return false;
+    const ids = (await this.lineObjects(page, box)).map((o) => o.id);
+    if (!ids.length) {
+      notify("This line can't be reformatted (its text isn't readable from the PDF)");
+      return false;
+    }
+    const what = data.op === "recolor" ? "Recoloured the line" : data.family ? `Font: ${data.family}${data.size ? ` ${data.size} pt` : ""}` : `Size: ${data.size} pt`;
+    return this.command(
+      { kind: "object", before: doc.pages.map((p) => p.page_no), data },
+      () => cmdObjectOp(page, { ...data, ids }),
+      () => ({ status: what, page }),
+    );
   },
 
   async insertShape(page: number, spec: Record<string, unknown>) {

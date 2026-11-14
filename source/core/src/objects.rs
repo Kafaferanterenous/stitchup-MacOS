@@ -24,6 +24,33 @@ pub struct PageObject {
     pub text: String,
     /// User-space bounding box [x0, y0, x1, y1].
     pub rect: [f64; 4],
+    /// Text only: font name without subset prefix (e.g. "Times-Bold").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// Text only: effective size on the page, in points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Text only: fill colour as "#rrggbb" (when it is gray/RGB/CMYK).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+/// "#rrggbb" for the fill operators in effect (g / rg / k).
+fn fill_hex(fill: &[Operation]) -> Option<String> {
+    let f = |o: &Object| match o {
+        Object::Integer(i) => Some(*i as f64),
+        Object::Real(r) => Some(*r as f64),
+        _ => None,
+    };
+    let op = fill.iter().rev().find(|o| matches!(o.operator.as_str(), "g" | "rg" | "k" | "sc" | "scn"))?;
+    let v: Vec<f64> = op.operands.iter().filter_map(f).collect();
+    let rgb = match (op.operator.as_str(), v.len()) {
+        ("g", 1) | (_, 1) => [v[0]; 3],
+        (_, 3) => [v[0], v[1], v[2]],
+        (_, 4) => [(1.0 - v[0]) * (1.0 - v[3]), (1.0 - v[1]) * (1.0 - v[3]), (1.0 - v[2]) * (1.0 - v[3])],
+        _ => return None,
+    };
+    Some(format!("#{:02x}{:02x}{:02x}", (rgb[0].clamp(0.0, 1.0) * 255.0).round() as u8, (rgb[1].clamp(0.0, 1.0) * 255.0).round() as u8, (rgb[2].clamp(0.0, 1.0) * 255.0).round() as u8))
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -157,7 +184,18 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
             if s.text.trim().is_empty() && s.decoded {
                 continue;
             }
-            out.push(PageObject { id: format!("t{}", s.op), kind: "text".into(), text: s.text.clone(), rect: b });
+            let font = pc.fonts.get(&s.font).map(|f| {
+                let n = f.base_font.as_str();
+                // Drop a subset prefix such as "ABCDEF+".
+                match n.split_once('+') {
+                    Some((p, rest)) if p.len() == 6 && p.chars().all(|c| c.is_ascii_uppercase()) => rest.to_string(),
+                    _ => n.to_string(),
+                }
+            });
+            let scale = (s.trm[2] * s.trm[2] + s.trm[3] * s.trm[3]).sqrt();
+            let size = ((s.size * scale * 10.0).round() / 10.0).abs();
+            let color = if s.fill.is_empty() { Some("#000000".into()) } else { fill_hex(&s.fill) };
+            out.push(PageObject { id: format!("t{}", s.op), kind: "text".into(), text: s.text.clone(), rect: b, font, size: Some(size), color });
         }
     }
     for d in &pc.parsed.draws {
@@ -167,6 +205,9 @@ pub fn list(doc: &PdfDoc, page_no: u32) -> Result<Vec<PageObject>, EngineError> 
             kind: if image { "image" } else { "graphic" }.into(),
             text: String::from_utf8_lossy(&d.name).into_owned(),
             rect: bbox(&d.ctm, 0.0, 0.0, 1.0, 1.0),
+            font: None,
+            size: None,
+            color: None,
         });
     }
     Ok(out)
@@ -355,9 +396,52 @@ pub fn recolor(doc: &mut PdfDoc, page_no: u32, ids: &[String], rgb: [f64; 3]) ->
     Ok(n)
 }
 
-/// Redraw text runs in a standard font family at `size` (None = keep size).
+/// Redraw text runs in a standard font family at `size` — the size as seen
+/// on the page, in points (None = keep). `family` "" keeps each run's own
+/// font and only changes its size.
 pub fn set_font(doc: &mut PdfDoc, page_no: u32, ids: &[String], family: &str, size: Option<f64>) -> Result<usize, EngineError> {
     let pc = load(doc, page_no)?;
+    // Page size → Tf operand (text may be scaled by its matrix, e.g. Tf 1 + Tm 12).
+    let tf_size = |s: &crate::textedit::Show| match size {
+        Some(v) => {
+            let scale = (s.trm[2] * s.trm[2] + s.trm[3] * s.trm[3]).sqrt();
+            if scale > 1e-6 { v / scale } else { v }
+        }
+        None => s.size,
+    };
+    if family.is_empty() {
+        let Some(_) = size else {
+            return Err(crate::err!(ErrorCode::ValidationFailed, "choose a font or a size"));
+        };
+        let mut repl = HashMap::new();
+        for (k, i) in parse_ids(ids) {
+            if k != 't' {
+                continue;
+            }
+            let Some(s) = pc.parsed.shows.iter().find(|s| s.op == i) else { continue };
+            let mut v = vec![];
+            if pc.ops[i].operator == "'" || pc.ops[i].operator == "\"" {
+                v.push(Operation::new("T*", vec![]));
+            }
+            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(tf_size(s))]));
+            let mut show = pc.ops[i].clone();
+            if show.operator == "'" || show.operator == "\"" {
+                let last = show.operands.last().cloned().unwrap_or(Object::Null);
+                show = Operation::new("Tj", vec![last]);
+            }
+            v.push(show);
+            v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
+            v.push(restore_tm(&pc, s));
+            repl.insert(i, v);
+        }
+        let n = repl.len();
+        if n == 0 {
+            return Err(crate::err!(ErrorCode::ValidationFailed, "select text to change its size"));
+        }
+        let ops = rebuild(&pc.ops, repl);
+        store(doc, &pc, ops)?;
+        return Ok(n);
+    }
     let base = match family {
         "Helvetica" | "Helvetica-Bold" | "Helvetica-Oblique" | "Helvetica-BoldOblique" | "Times-Roman" | "Times-Bold"
         | "Times-Italic" | "Times-BoldItalic" | "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => family,
@@ -379,7 +463,7 @@ pub fn set_font(doc: &mut PdfDoc, page_no: u32, ids: &[String], family: &str, si
         if pc.ops[i].operator == "'" || pc.ops[i].operator == "\"" {
             v.push(Operation::new("T*", vec![]));
         }
-        v.push(Operation::new("Tf", vec![Object::Name(name), r(size.unwrap_or(s.size))]));
+        v.push(Operation::new("Tf", vec![Object::Name(name), r(tf_size(s))]));
         v.push(Operation::new("Tj", vec![Object::String(enc.bytes, StringFormat::Literal)]));
         v.push(Operation::new("Tf", vec![Object::Name(s.font.clone()), r(s.size)]));
         v.push(restore_tm(&pc, s));

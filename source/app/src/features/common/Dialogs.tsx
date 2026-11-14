@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { useAppState, store, getState, docName, isUntitled, rgb } from "../../store";
+import { useAppState, store, getState, docName, isUntitled, rgb, annotColor } from "../../store";
 import { extractTo, parsePages, splitInto } from "../../actions";
 import { cmdDiscardRecovery, cmdListAttachments, cmdSaveAttachment, cmdSaveEncrypted, cmdSign, cmdWriteFile, type AttachmentInfo, type RecoveryEntry } from "../../ipc";
 import { loadSettings, saveSettings, type Settings } from "../../settings";
@@ -694,9 +694,9 @@ export function HelpDialog() {
         <h3>Opening and saving</h3>
         <p>Open a PDF with ⌘O, by dropping it on the window or the Dock icon, or from Finder. ⌘S saves in place (the file is replaced atomically, never half-written); ⌘⇧S saves under a new name. The Save button turns red while there are unsaved changes.</p>
         <h3>Ribbon</h3>
-        <p><b>Document</b> — new, open, save, properties, attachments, import, exports (text, CSV, images, RTF, DOCX, ODT), print. <b>Pages</b> — rotate, delete, add, extract, split, auto-crop. <b>Content</b> — Edit Text. <b>Zoom</b>, <b>Navigate</b> — view controls. <b>Security</b> — watermark and password protection.</p>
+        <p><b>Document</b> — new, open, save, properties, import, exports (text, CSV, images, RTF, DOCX, ODT), print. <b>Pages</b> — rotate, delete, add, extract, split, auto-crop. <b>Content</b> — Edit Text. <b>Zoom</b>, <b>Navigate</b> — view controls. <b>Security</b> — watermark and password protection.</p>
         <h3>Editing text</h3>
-        <p>Content ▸ Edit Text, then click any line. It is edited in place, in the document’s own font when it has the needed letters. Enter or clicking away saves; Tab moves to the next line; Esc cancels; clearing the text deletes the line.</p>
+        <p>Double-click any line (or Content ▸ Edit Text, then click it). It is edited in place, in the document’s own font when it has the needed letters. A bar above the line shows its font and size: change the font, bold / italic, size or colour there, or with Content ▸ Fore and Font. Enter or clicking away saves; Tab moves to the next line; Esc cancels; clearing the text deletes the line.</p>
         <h3>Pages sidebar</h3>
         <p>Drag thumbnails to reorder. ⌘-click and Shift-click select several pages; Rotate, Delete, Extract and Watermark then act on the selection. F8 shows or hides the sidebar.</p>
         <h3>Keyboard</h3>
@@ -766,7 +766,7 @@ export function AnnotInputDialog() {
       await store.annotate(p.page, { kind: "note", at: [p.rect[0], p.rect[1]], text: t, color: [1, 0.85, 0.2] });
     } else {
       if (!t) return;
-      await store.annotate(p.page, { kind: "text_box", rect: p.rect, text: t, size: Number(size), color: rgb(app.foreColor) });
+      await store.annotate(p.page, { kind: "text_box", rect: p.rect, text: t, size: Number(size), color: rgb(annotColor(app, "other")) });
     }
     done();
   }
